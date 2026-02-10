@@ -25,7 +25,7 @@ import {
 	TrendingUp,
 	Settings,
 	Route,
-} from "lucide-react"; // Activity borttagen här
+} from "lucide-react";
 import {
 	getISOWeek,
 	format,
@@ -144,7 +144,6 @@ export default function Home() {
 				const weekNum = getISOWeek(event.start_date_local);
 				const label = `W${weekNum.toString().padStart(2, "0")}`;
 
-				// Now utilizing the shared logic function
 				const duration = getEstimatedDuration(event);
 
 				acc[label] = (acc[label] || 0) + duration;
@@ -161,9 +160,8 @@ export default function Home() {
 	return (
 		<div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans">
 			{/* SIDEBAR */}
-			<aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 overflow-y-auto h-screen sticky top-0">
+			<aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 md:h-screen md:sticky md:top-0 md:overflow-y-auto shrink-0 z-20">
 				<div className="flex items-center gap-2 mb-2">
-					{/* Ikonen borttagen här */}
 					<h1 className="text-xl font-bold tracking-tight">🏃‍♂️‍➡️ Race Planner</h1>
 				</div>
 
@@ -341,18 +339,11 @@ export default function Home() {
 														| Array<number | string>
 														| undefined,
 												) => {
-													// Safety check
 													if (value === undefined || value === null)
 														return ["-", "mmol/L"];
-
-													// Can be array if multiple lines, we only have one, so join if array
 													if (Array.isArray(value))
 														return [value.join(", "), "mmol/L"];
-
-													// 3. Now TS knows it's string or number. Convert to number.
 													const num = Number(value);
-
-													// 4. Format
 													return [
 														!isNaN(num) ? num.toFixed(1) : value,
 														"mmol/L",
@@ -398,21 +389,21 @@ export default function Home() {
 
 				<button
 					onClick={handleGenerate}
-					className="mt-auto w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition shadow-lg"
+					className="mt-auto w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition shadow-lg mb-24 md:mb-0"
 				>
 					Generate Plan
 				</button>
 			</aside>
 
 			{/* MAIN CONTENT */}
-			<main className="flex-1 p-8 overflow-y-auto h-screen">
+			<main className="flex-1 p-4 md:p-8 md:overflow-y-auto md:h-screen bg-slate-50">
 				{planEvents.length === 0 ? (
-					<div className="h-full flex flex-col items-center justify-center text-slate-400">
+					<div className="h-64 md:h-full flex flex-col items-center justify-center text-slate-400">
 						<CalendarCheck size={64} className="mb-4 opacity-20" />
 						<p>Configure settings and generate your plan.</p>
 					</div>
 				) : (
-					<div className="max-w-4xl mx-auto space-y-8 pb-20">
+					<div className="max-w-4xl mx-auto space-y-8 pb-32 md:pb-20">
 						{/* DASHBOARD */}
 						<section className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
 							<h2 className="text-lg font-bold mb-6">
@@ -453,18 +444,20 @@ export default function Home() {
 							</div>
 						</section>
 
-						{/* ACTION BAR */}
-						<div className="sticky top-4 z-10 flex items-center justify-between bg-blue-50 p-4 rounded-lg border border-blue-100 shadow-sm backdrop-blur-sm bg-opacity-90">
+						{/* ACTION BAR (FIXED BOTTOM ON MOBILE) */}
+						<div className="fixed bottom-4 left-4 right-4 md:static z-50 flex items-center justify-between bg-blue-50 p-4 rounded-lg border border-blue-100 shadow-xl md:shadow-sm backdrop-blur-sm bg-opacity-95 md:bg-opacity-100">
 							<div>
-								<h3 className="font-bold text-blue-900">Ready to sync?</h3>
-								<p className="text-sm text-blue-700">
+								<h3 className="font-bold text-blue-900 text-sm md:text-base">
+									Ready to sync?
+								</h3>
+								<p className="text-xs md:text-sm text-blue-700">
 									{planEvents.length} workouts generated.
 								</p>
 							</div>
 							<button
 								onClick={handleUpload}
 								disabled={isUploading}
-								className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-md font-bold hover:bg-blue-700 disabled:opacity-50 transition shadow-sm"
+								className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-md font-bold hover:bg-blue-700 disabled:opacity-50 transition shadow-sm text-sm md:text-base"
 							>
 								{isUploading ? (
 									"Syncing..."
@@ -492,17 +485,17 @@ export default function Home() {
 							{planEvents.map((ev, i) => (
 								<div
 									key={i}
-									className="bg-white p-4 rounded border border-slate-100 flex flex-col md:flex-row md:items-start gap-4 hover:border-blue-200 transition"
+									className="bg-white p-4 rounded border border-slate-100 flex flex-col gap-2 hover:border-blue-200 transition"
 								>
-									<div className="w-24 shrink-0 text-slate-500 text-sm font-mono pt-1">
-										{format(ev.start_date_local, "yyyy-MM-dd")}
-									</div>
-									<div className="flex-1">
+									<div className="flex justify-between items-baseline">
 										<h4 className="font-bold text-slate-900">{ev.name}</h4>
-										<pre className="text-xs text-slate-500 mt-2 whitespace-pre-wrap font-sans bg-slate-50 p-2 rounded">
-											{ev.description}
-										</pre>
+										<span className="text-slate-400 text-xs font-mono">
+											{format(ev.start_date_local, "yyyy-MM-dd")}
+										</span>
 									</div>
+									<pre className="text-xs text-slate-500 whitespace-pre-wrap font-sans bg-slate-50 p-3 rounded">
+										{ev.description}
+									</pre>
 								</div>
 							))}
 						</div>
