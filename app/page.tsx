@@ -6,6 +6,7 @@ import {
 	uploadToIntervals,
 	analyzeHistory,
 	WorkoutEvent,
+	getEstimatedDuration,
 } from "@/lib/plannerLogic";
 import {
 	BarChart,
@@ -137,22 +138,25 @@ export default function Home() {
 	};
 
 	// Chart Prep
-	const chartData = planEvents
-		.reduce((acc: any[], event) => {
-			const weekNum = getISOWeek(event.start_date_local);
-			const label = `W${weekNum.toString().padStart(2, "0")}`;
-			let mins = 45;
-			if (event.name.includes("Easy")) mins = 45;
-			if (event.name.includes("LR")) {
-				const match = event.name.match(/(\d+)km/);
-				if (match) mins = parseInt(match[1]) * 6;
-			}
-			const existing = acc.find((d: any) => d.name === label);
-			if (existing) existing.mins += mins;
-			else acc.push({ name: label, mins });
-			return acc;
-		}, [])
-		.sort((a: any, b: any) => a.name.localeCompare(b.name));
+	const chartData = useMemo(() => {
+		const weeklyVolume = planEvents.reduce<Record<string, number>>(
+			(acc, event) => {
+				const weekNum = getISOWeek(event.start_date_local);
+				const label = `W${weekNum.toString().padStart(2, "0")}`;
+
+				// Now utilizing the shared logic function
+				const duration = getEstimatedDuration(event);
+
+				acc[label] = (acc[label] || 0) + duration;
+				return acc;
+			},
+			{},
+		);
+
+		return Object.entries(weeklyVolume)
+			.map(([name, mins]) => ({ name, mins }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	}, [planEvents]);
 
 	return (
 		<div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans">
@@ -330,10 +334,30 @@ export default function Home() {
 													borderRadius: "4px",
 													border: "1px solid #e2e8f0",
 												}}
-												formatter={(value: number) => [
-													value.toFixed(1),
-													"mmol/L",
-												]}
+												formatter={(
+													value:
+														| number
+														| string
+														| Array<number | string>
+														| undefined,
+												) => {
+													// Safety check
+													if (value === undefined || value === null)
+														return ["-", "mmol/L"];
+
+													// Can be array if multiple lines, we only have one, so join if array
+													if (Array.isArray(value))
+														return [value.join(", "), "mmol/L"];
+
+													// 3. Now TS knows it's string or number. Convert to number.
+													const num = Number(value);
+
+													// 4. Format
+													return [
+														!isNaN(num) ? num.toFixed(1) : value,
+														"mmol/L",
+													];
+												}}
 												labelFormatter={(label) => `${label} min`}
 											/>
 											<Line
@@ -413,7 +437,7 @@ export default function Home() {
 											}}
 										/>
 										<Bar dataKey="mins" fill="#3b82f6" radius={[4, 4, 0, 0]}>
-											{chartData.map((entry: any, index: number) => (
+											{chartData.map((_, index: number) => (
 												<Cell
 													key={`cell-${index}`}
 													fill={

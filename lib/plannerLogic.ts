@@ -48,7 +48,31 @@ interface PlanContext {
 	};
 }
 
+// New interfaces to avoid 'any' in analysis
+interface IntervalsActivity {
+	id: string;
+	start_date: string;
+	name: string;
+	description?: string;
+}
+
+interface IntervalsStream {
+	type: string;
+	data: number[];
+}
+
 // --- HELPER FUNCTIONS ---
+export const getEstimatedDuration = (event: WorkoutEvent): number => {
+	// 1. Long Run: Calculate 6 min/km (approximate trail pace)
+	if (event.name.includes("LR")) {
+		const match = event.name.match(/(\d+)km/);
+		if (match) return parseInt(match[1]) * 6;
+	}
+
+	// 2. Default duration for other workouts (Easy, Tempo, Hills)
+	return 45;
+};
+
 const formatStep = (
 	duration: string,
 	minPct: number,
@@ -58,7 +82,7 @@ const formatStep = (
 ): string => {
 	const minBpm = Math.floor(lthr * minPct);
 	const maxBpm = Math.ceil(lthr * maxPct);
-	// Note kommer först (för Garmin display), sen duration, sen zon
+	// Note comes first (for Garmin display), then duration, then zone
 	const core = `${duration} ${Math.floor(minPct * 100)}-${Math.ceil(maxPct * 100)}% LTHR (${minBpm}-${maxBpm} bpm)`;
 	return note ? `${note} ${core}` : core;
 };
@@ -86,7 +110,10 @@ const createWorkoutText = (
 };
 
 // --- ANALYSIS LOGIC ---
-async function fetchStreams(activityId: string, apiKey: string) {
+async function fetchStreams(
+	activityId: string,
+	apiKey: string,
+): Promise<IntervalsStream[]> {
 	const auth = "Basic " + btoa("API_KEY:" + apiKey);
 	const keys = ["time", "bloodglucose", "glucose", "ga_smooth"].join(",");
 	try {
@@ -117,16 +144,16 @@ export async function analyzeHistory(
 			{ headers: { Authorization: auth } },
 		);
 		if (!res.ok) throw new Error("Failed to fetch activities");
-		const activities = await res.json();
+		const activities: IntervalsActivity[] = await res.json();
 
-		const relevant = activities.filter((a: any) =>
+		const relevant = activities.filter((a) =>
 			a.name.toLowerCase().includes(prefix.toLowerCase()),
 		);
 
 		let currentFuel = 10;
 		if (relevant.length > 0) {
 			relevant.sort(
-				(a: any, b: any) =>
+				(a, b) =>
 					new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
 			);
 			const lastRun = relevant[0];
@@ -138,20 +165,22 @@ export async function analyzeHistory(
 		let plotData: { time: number; glucose: number }[] = [];
 		const recentRuns = relevant.slice(0, 3);
 
-		for (let i = 0; i < recentRuns.length; i++) {
-			const run = recentRuns[i];
+		// Replaced standard for-loop with for...of with entries()
+		for (const [index, run] of recentRuns.entries()) {
 			const streams = await fetchStreams(run.id, apiKey);
 			let tData: number[] = [];
 			let gData: number[] = [];
 
-			streams.forEach((s: any) => {
+			for (const s of streams) {
 				if (s.type === "time") tData = s.data;
-				if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type))
+				if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
 					gData = s.data;
-			});
+				}
+			}
 
 			if (gData.length > 0 && tData.length > 1) {
-				if (i === 0) {
+				// Only collect plot data for the most recent run (index 0)
+				if (index === 0) {
 					plotData = tData.map((t, idx) => ({
 						time: Math.round(t / 60),
 						glucose: gData[idx],
@@ -192,8 +221,8 @@ const generateQualityRun = (
 	const isRaceTest =
 		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelG}g/10m`; // Lite kortare text för att rymmas på klockan
-	// FIX: Vi lägger strategin som Note i formatStep, så den hamnar först på raden
+	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelG}g/10m`; // Slightly shorter text to fit on the watch
+	// FIX: We add the strategy as a Note in formatStep, so it ends up first on the line
 	const wu = formatStep(
 		"10m",
 		ctx.zones.easy.min,
@@ -269,7 +298,7 @@ const generateEasyRun = (
 		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
 	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelG}g/10m`;
-	// FIX: Strategin här också
+	// FIX: Strategy here as well
 	const wu = formatStep(
 		"10m",
 		ctx.zones.easy.min,
@@ -311,7 +340,7 @@ const generateBonusRun = (
 	const weekNum = weekIdx + 1;
 
 	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelG}g/10m`;
-	// FIX: Strategin här
+	// FIX: Strategy here
 	const wu = formatStep(
 		"10m",
 		ctx.zones.easy.min,
@@ -381,7 +410,7 @@ const generateLongRun = (
 		type = " [RACE TEST]";
 	}
 
-	// FIX: Strategin här
+	// FIX: Strategy here
 	const wu = formatStep(
 		"10m",
 		ctx.zones.easy.min,
