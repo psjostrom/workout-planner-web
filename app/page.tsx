@@ -32,15 +32,20 @@ export default function Home() {
 	const [prefix, setPrefix] = useState("eco16");
 	const [totalWeeks, setTotalWeeks] = useState(18);
 	const [startKm, setStartKm] = useState(8);
-	const [fuel, setFuel] = useState(10);
+	const [fuelInterval, setFuelInterval] = useState(5); // Low fuel for intervals (5g/10m)
+	const [fuelSteady, setFuelSteady] = useState(10); // High fuel for long runs (10g/10m)
 	const [planEvents, setPlanEvents] = useState<WorkoutEvent[]>([]);
 	const [isUploading, setIsUploading] = useState(false);
 	const [isAnalyzing, setIsAnalyzing] = useState(false);
 	const [statusMsg, setStatusMsg] = useState("");
-	const [trend, setTrend] = useState<number | null>(null);
-	const [plotData, setPlotData] = useState<{ time: number; glucose: number }[]>(
-		[],
-	);
+	const [longRunAnalysis, setLongRunAnalysis] = useState<{
+		trend: number;
+		plotData: { time: number; glucose: number }[];
+	} | null>(null);
+	const [intervalAnalysis, setIntervalAnalysis] = useState<{
+		trend: number;
+		plotData: { time: number; glucose: number }[];
+	} | null>(null);
 
 	const phaseInfo = usePhaseInfo(raceDate, totalWeeks);
 	const chartData = useWeeklyVolumeData(planEvents);
@@ -53,23 +58,50 @@ export default function Home() {
 		}
 		setIsAnalyzing(true);
 		const result = await analyzeHistory(apiKey, prefix);
-		setTrend(result.trend);
-		setPlotData(result.plotData);
 
-		let sugg = result.currentFuel;
-		if (result.trend < -3.0) {
-			const diff = Math.abs(result.trend - -3.0);
-			sugg += Math.min(1 + Math.floor(diff * 0.7), 4);
-		} else if (result.trend > 3.0) {
-			sugg = Math.max(0, sugg - 1);
+		// Store Long Run analysis
+		if (result.longRun) {
+			setLongRunAnalysis({
+				trend: result.longRun.trend,
+				plotData: result.longRun.plotData,
+			});
+
+			// Auto-adjust fuelSteady based on long run trend
+			let suggSteady = result.longRun.currentFuel;
+			if (result.longRun.trend < -3.0) {
+				const diff = Math.abs(result.longRun.trend - -3.0);
+				suggSteady += Math.min(1 + Math.floor(diff * 0.7), 4);
+			} else if (result.longRun.trend > 3.0) {
+				suggSteady = Math.max(0, suggSteady - 1);
+			}
+			setFuelSteady(suggSteady);
 		}
-		setFuel(sugg);
+
+		// Store Interval analysis
+		if (result.interval) {
+			setIntervalAnalysis({
+				trend: result.interval.trend,
+				plotData: result.interval.plotData,
+			});
+
+			// Auto-adjust fuelInterval based on interval trend
+			let suggInterval = result.interval.currentFuel;
+			if (result.interval.trend < -3.0) {
+				const diff = Math.abs(result.interval.trend - -3.0);
+				suggInterval += Math.min(1 + Math.floor(diff * 0.7), 4);
+			} else if (result.interval.trend > 3.0) {
+				suggInterval = Math.max(0, suggInterval - 1);
+			}
+			setFuelInterval(suggInterval);
+		}
+
 		setIsAnalyzing(false);
 	};
 
 	const handleGenerate = () => {
 		const events = generatePlan(
-			fuel,
+			fuelInterval,
+			fuelSteady,
 			raceDate,
 			raceDist,
 			prefix,
@@ -77,7 +109,13 @@ export default function Home() {
 			startKm,
 			lthr,
 		);
-		setPlanEvents(events);
+
+		// Filter out past workouts
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		const futureEvents = events.filter((e) => e.start_date_local >= today);
+
+		setPlanEvents(futureEvents);
 		setStatusMsg("");
 	};
 
@@ -88,7 +126,7 @@ export default function Home() {
 		}
 		setIsUploading(true);
 		try {
-			const count = await uploadToIntervals(apiKey, planEvents);
+			const count = await uploadToIntervals(apiKey, planEvents, prefix);
 			setStatusMsg(`✅ Success! Uploaded ${count} workouts.`);
 		} catch (e) {
 			setStatusMsg(`❌ Error: ${e}`);
@@ -142,12 +180,14 @@ export default function Home() {
 
 				<AnalysisSection
 					prefix={prefix}
-					trend={trend}
-					fuel={fuel}
-					plotData={plotData}
+					longRunAnalysis={longRunAnalysis}
+					intervalAnalysis={intervalAnalysis}
+					fuelInterval={fuelInterval}
+					fuelSteady={fuelSteady}
 					isAnalyzing={isAnalyzing}
 					onAnalyze={handleAnalyze}
-					onFuelChange={setFuel}
+					onFuelIntervalChange={setFuelInterval}
+					onFuelSteadyChange={setFuelSteady}
 				/>
 
 				<button

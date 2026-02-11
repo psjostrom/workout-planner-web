@@ -25,14 +25,22 @@ export interface WorkoutEvent {
 }
 
 export interface AnalysisResult {
-	trend: number;
-	currentFuel: number;
-	plotData: { time: number; glucose: number }[];
+	longRun: {
+		trend: number;
+		currentFuel: number;
+		plotData: { time: number; glucose: number }[];
+	} | null;
+	interval: {
+		trend: number;
+		currentFuel: number;
+		plotData: { time: number; glucose: number }[];
+	} | null;
 	msg?: string;
 }
 
 interface PlanContext {
-	fuelG: number;
+	fuelInterval: number; // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
+	fuelSteady: number; // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
 	raceDate: Date;
 	raceDist: number;
 	prefix: string;
@@ -128,6 +136,57 @@ async function fetchStreams(
 	return [];
 }
 
+// Categorize workout by type based on name
+function getWorkoutCategory(name: string): "long" | "interval" | "other" {
+	const lowerName = name.toLowerCase();
+	if (lowerName.includes("lr") || lowerName.includes("long")) return "long";
+	if (lowerName.includes("tempo") || lowerName.includes("hills"))
+		return "interval";
+	return "other";
+}
+
+async function analyzeRun(
+	run: IntervalsActivity,
+	apiKey: string,
+): Promise<{
+	trend: number;
+	currentFuel: number;
+	plotData: { time: number; glucose: number }[];
+}> {
+	const streams = await fetchStreams(run.id, apiKey);
+	let tData: number[] = [];
+	let gData: number[] = [];
+
+	for (const s of streams) {
+		if (s.type === "time") tData = s.data;
+		if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
+			gData = s.data;
+		}
+	}
+
+	let plotData: { time: number; glucose: number }[] = [];
+	let trend = 0.0;
+	let currentFuel = 10;
+
+	// Get fuel from description
+	const match = run.description?.match(/FUEL:\s*(\d+)g/i);
+	if (match) currentFuel = parseInt(match[1]);
+
+	if (gData.length > 0 && tData.length > 1) {
+		plotData = tData.map((t, idx) => ({
+			time: Math.round(t / 60),
+			glucose: gData[idx],
+		}));
+		const delta = gData[gData.length - 1] - gData[0];
+		const durationHr = (tData[tData.length - 1] - tData[0]) / 3600;
+		if (durationHr > 0.2) {
+			trend = delta / durationHr;
+		}
+	}
+
+	return { trend, currentFuel, plotData };
+}
+
 export async function analyzeHistory(
 	apiKey: string,
 	prefix: string,
@@ -150,56 +209,43 @@ export async function analyzeHistory(
 			a.name.toLowerCase().includes(prefix.toLowerCase()),
 		);
 
-		let currentFuel = 10;
-		if (relevant.length > 0) {
-			relevant.sort(
-				(a, b) =>
-					new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
-			);
-			const lastRun = relevant[0];
-			const match = lastRun.description?.match(/FUEL:\s*(\d+)g/i);
-			if (match) currentFuel = parseInt(match[1]);
+		if (relevant.length === 0) {
+			return { longRun: null, interval: null, msg: "No activities found" };
 		}
 
-		const dropRates: number[] = [];
-		let plotData: { time: number; glucose: number }[] = [];
-		const recentRuns = relevant.slice(0, 3);
+		// Sort by date (most recent first)
+		relevant.sort(
+			(a, b) =>
+				new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
+		);
 
-		// Replaced standard for-loop with for...of with entries()
-		for (const [index, run] of recentRuns.entries()) {
-			const streams = await fetchStreams(run.id, apiKey);
-			let tData: number[] = [];
-			let gData: number[] = [];
+		// Find most recent Long run and Interval run
+		const mostRecentLong = relevant.find(
+			(a) => getWorkoutCategory(a.name) === "long",
+		);
+		const mostRecentInterval = relevant.find(
+			(a) => getWorkoutCategory(a.name) === "interval",
+		);
 
-			for (const s of streams) {
-				if (s.type === "time") tData = s.data;
-				if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
-					gData = s.data;
-				}
-			}
+		const result: AnalysisResult = {
+			longRun: null,
+			interval: null,
+		};
 
-			if (gData.length > 0 && tData.length > 1) {
-				// Only collect plot data for the most recent run (index 0)
-				if (index === 0) {
-					plotData = tData.map((t, idx) => ({
-						time: Math.round(t / 60),
-						glucose: gData[idx],
-					}));
-				}
-				const delta = gData[gData.length - 1] - gData[0];
-				const durationHr = (tData[tData.length - 1] - tData[0]) / 3600;
-				if (durationHr > 0.2) dropRates.push(delta / durationHr);
-			}
+		// Analyze Long run if found
+		if (mostRecentLong) {
+			result.longRun = await analyzeRun(mostRecentLong, apiKey);
 		}
 
-		const avgTrend =
-			dropRates.length > 0
-				? dropRates.reduce((a, b) => a + b, 0) / dropRates.length
-				: 0.0;
-		return { trend: avgTrend, currentFuel, plotData };
+		// Analyze Interval run if found
+		if (mostRecentInterval) {
+			result.interval = await analyzeRun(mostRecentInterval, apiKey);
+		}
+
+		return result;
 	} catch (error) {
 		console.error("Analysis failed", error);
-		return { trend: 0, currentFuel: 10, plotData: [], msg: "Analysis failed" };
+		return { longRun: null, interval: null, msg: "Analysis failed" };
 	}
 }
 
@@ -221,7 +267,7 @@ const generateQualityRun = (
 	const isRaceTest =
 		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelG}g/10m`; // Slightly shorter text to fit on the watch
+	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelInterval}g/10m`; // Intervals use LOW fuel
 	// FIX: We add the strategy as a Note in formatStep, so it ends up first on the line
 	const wu = formatStep(
 		"10m",
@@ -297,7 +343,7 @@ const generateEasyRun = (
 	const isRaceTest =
 		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelG}g/10m`;
+	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Easy runs use MODERATE fuel
 	// FIX: Strategy here as well
 	const wu = formatStep(
 		"10m",
@@ -339,7 +385,7 @@ const generateBonusRun = (
 	if (isSameDay(date, ctx.raceDate)) return null;
 	const weekNum = weekIdx + 1;
 
-	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelG}g/10m`;
+	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Bonus runs use MODERATE fuel
 	// FIX: Strategy here
 	const wu = formatStep(
 		"10m",
@@ -372,12 +418,12 @@ const generateLongRun = (
 ): WorkoutEvent | null => {
 	const weekNum = weekIdx + 1;
 	const isRaceWeek = weekNum === ctx.totalWeeks;
-	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelG}g/10m`;
+	const stratLong = `PUMP OFF - FUEL: ${ctx.fuelSteady}g/10m`; // Long runs use HIGH fuel
 	if (isRaceWeek) {
 		return {
 			start_date_local: new Date(ctx.raceDate.setHours(10, 0, 0)),
 			name: `RACE DAY ${ctx.prefix}`,
-			description: `RACE DAY! ${ctx.raceDist}km. ${stratHard}\n\nGood luck!`,
+			description: `RACE DAY! ${ctx.raceDist}km. ${stratLong}\n\nGood luck!`,
 			external_id: `${ctx.prefix}-race`,
 			type: "Run",
 		};
@@ -416,7 +462,7 @@ const generateLongRun = (
 		ctx.zones.easy.min,
 		ctx.zones.easy.max,
 		ctx.lthr,
-		stratHard,
+		stratLong,
 	);
 	const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
@@ -424,7 +470,7 @@ const generateLongRun = (
 		start_date_local: new Date(date.setHours(10, 0, 0)),
 		name: `W${weekNum.toString().padStart(2, "0")} Sun LR (${km}km)${type} ${ctx.prefix}`,
 		description: createWorkoutText(
-			`${stratHard} (Trail)`,
+			`${stratLong} (Trail)`,
 			wu,
 			[
 				formatStep(
@@ -443,7 +489,8 @@ const generateLongRun = (
 
 // --- MAIN ORCHESTRATOR ---
 export function generatePlan(
-	fuelG: number,
+	fuelInterval: number, // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
+	fuelSteady: number, // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
 	raceDateStr: string,
 	raceDist: number,
 	prefix: string,
@@ -454,7 +501,8 @@ export function generatePlan(
 	const raceDate = parseISO(raceDateStr);
 	const today = new Date();
 	const ctx: PlanContext = {
-		fuelG,
+		fuelInterval,
+		fuelSteady,
 		raceDate,
 		raceDist,
 		prefix,
@@ -489,14 +537,32 @@ export function generatePlan(
 export async function uploadToIntervals(
 	apiKey: string,
 	events: WorkoutEvent[],
+	prefix: string,
 ): Promise<number> {
+	const auth = "Basic " + btoa("API_KEY:" + apiKey);
 	const todayStr = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
 	const endStr = format(addDays(new Date(), 365), "yyyy-MM-dd'T'HH:mm:ss");
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	await fetch(
-		`${API_BASE}/athlete/0/events?oldest=${todayStr}&newest=${endStr}&category=WORKOUT`,
-		{ method: "DELETE", headers: { Authorization: auth } },
-	);
+
+	// Delete all future workouts with a single call
+	try {
+		console.log("Deleting all future workouts...");
+		const deleteRes = await fetch(
+			`${API_BASE}/athlete/0/events?oldest=${todayStr}&newest=${endStr}&category=WORKOUT`,
+			{
+				method: "DELETE",
+				headers: { Authorization: auth },
+			},
+		);
+
+		if (!deleteRes.ok) {
+			console.error(`Delete failed with status ${deleteRes.status}`);
+		}
+	} catch (deleteError) {
+		console.error("Error during deletion phase:", deleteError);
+		// Continue with upload even if deletion fails
+	}
+
+	// Upload the new plan
 	const payload = events.map((e) => ({
 		category: "WORKOUT",
 		start_date_local: format(e.start_date_local, "yyyy-MM-dd'T'HH:mm:ss"),
@@ -505,11 +571,22 @@ export async function uploadToIntervals(
 		external_id: e.external_id,
 		type: e.type,
 	}));
-	const res = await fetch(`${API_BASE}/athlete/0/events/bulk?upsert=true`, {
-		method: "POST",
-		headers: { Authorization: auth, "Content-Type": "application/json" },
-		body: JSON.stringify(payload),
-	});
-	if (!res.ok) throw new Error(`API Error: ${res.status}`);
-	return payload.length;
+
+	try {
+		const res = await fetch(`${API_BASE}/athlete/0/events/bulk?upsert=true`, {
+			method: "POST",
+			headers: { Authorization: auth, "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		});
+		if (!res.ok) {
+			const errorText = await res.text();
+			throw new Error(`API Error ${res.status}: ${errorText}`);
+		}
+		return payload.length;
+	} catch (error) {
+		console.error("Upload failed:", error);
+		console.error("Payload size:", payload.length);
+		console.error("First event:", payload[0]);
+		throw error;
+	}
 }
