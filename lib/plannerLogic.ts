@@ -366,7 +366,7 @@ const generateEasyRun = (
 		description: createWorkoutText(
 			stratEasy,
 			wu,
-			[formatStep(`${duration}m`, 0.7, 0.8, ctx.lthr)],
+			[formatStep(`${duration}m`, ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr)],
 			cd,
 		),
 		external_id: `${ctx.prefix}-thu-${weekNum}`,
@@ -514,10 +514,10 @@ export function generatePlan(
 			-(totalWeeks - 1),
 		),
 		zones: {
-			easy: { min: 0.65, max: 0.75 },
-			steady: { min: 0.72, max: 0.82 },
-			tempo: { min: 0.88, max: 0.92 },
-			hard: { min: 0.92, max: 1.0 },
+			easy: { min: 0.72, max: 0.8 },
+			steady: { min: 0.77, max: 0.84 },
+			tempo: { min: 0.88, max: 0.94 },
+			hard: { min: 0.95, max: 1.0 },
 		},
 	};
 	const weekIndices = Array.from({ length: totalWeeks }, (_, i) => i);
