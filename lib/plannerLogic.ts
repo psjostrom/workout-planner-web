@@ -533,6 +533,91 @@ export function generatePlan(
 	});
 }
 
+// --- CALENDAR TYPES ---
+export interface CalendarEvent {
+	id: string;
+	date: Date;
+	name: string;
+	description: string;
+	type: "completed" | "planned" | "race";
+	category: "long" | "interval" | "easy" | "race" | "other";
+	distance?: number;
+	duration?: number;
+}
+
+// --- CALENDAR API ---
+export async function fetchCalendarData(
+	apiKey: string,
+	startDate: Date,
+	endDate: Date,
+): Promise<CalendarEvent[]> {
+	const auth = "Basic " + btoa("API_KEY:" + apiKey);
+	const oldest = format(startDate, "yyyy-MM-dd");
+	const newest = format(endDate, "yyyy-MM-dd");
+
+	try {
+		// Fetch both activities (completed) and events (planned) in parallel
+		const [activitiesRes, eventsRes] = await Promise.all([
+			fetch(
+				`${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
+				{ headers: { Authorization: auth } },
+			),
+			fetch(
+				`${API_BASE}/athlete/0/events?oldest=${oldest}&newest=${newest}`,
+				{ headers: { Authorization: auth } },
+			),
+		]);
+
+		const activities = activitiesRes.ok ? await activitiesRes.json() : [];
+		const events = eventsRes.ok ? await eventsRes.json() : [];
+
+		const calendarEvents: CalendarEvent[] = [];
+
+		// Process completed activities
+		for (const activity of activities) {
+			if (activity.type !== "Run") continue;
+
+			const category = getWorkoutCategory(activity.name);
+			calendarEvents.push({
+				id: `activity-${activity.id}`,
+				date: parseISO(activity.start_date_local),
+				name: activity.name,
+				description: activity.description || "",
+				type: "completed",
+				category,
+				distance: activity.distance,
+				duration: activity.moving_time,
+			});
+		}
+
+		// Process planned events
+		for (const event of events) {
+			if (event.category !== "WORKOUT") continue;
+
+			const name = event.name || "";
+			const isRace = name.toLowerCase().includes("race");
+			const category = isRace ? "race" : getWorkoutCategory(name);
+
+			calendarEvents.push({
+				id: `event-${event.id}`,
+				date: parseISO(event.start_date_local),
+				name,
+				description: event.description || "",
+				type: isRace ? "race" : "planned",
+				category,
+			});
+		}
+
+		// Sort by date
+		calendarEvents.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+		return calendarEvents;
+	} catch (error) {
+		console.error("Failed to fetch calendar data:", error);
+		return [];
+	}
+}
+
 // --- API UPLOAD ---
 export async function uploadToIntervals(
 	apiKey: string,

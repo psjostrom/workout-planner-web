@@ -38,8 +38,8 @@ function GlucoseChart({
 	return (
 		<div>
 			<div className="text-xs font-medium text-slate-600 mb-1">{title}</div>
-			<div className="h-32 w-full bg-white rounded border border-slate-200 p-1">
-				<ResponsiveContainer width="100%" height="100%">
+			<div className="h-32 w-full bg-white rounded border border-slate-200 p-1 min-h-0">
+				<ResponsiveContainer width="100%" height="100%" minHeight={120}>
 					<LineChart
 						data={plotData}
 						margin={{ top: 5, right: 5, bottom: 5, left: 0 }}

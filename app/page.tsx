@@ -18,6 +18,8 @@ import { WorkoutList } from "./components/WorkoutList";
 import { ActionBar } from "./components/ActionBar";
 import { StatusMessage } from "./components/StatusMessage";
 import { EmptyState } from "./components/EmptyState";
+import { TabNavigation } from "./components/TabNavigation";
+import { CalendarView } from "./components/CalendarView";
 import { usePhaseInfo } from "./hooks/usePhaseInfo";
 import { useWeeklyVolumeData } from "./hooks/useWeeklyVolumeData";
 
@@ -46,6 +48,9 @@ export default function Home() {
 		trend: number;
 		plotData: { time: number; glucose: number }[];
 	} | null>(null);
+	const [activeTab, setActiveTab] = useState<"planner" | "calendar">(
+		"planner",
+	);
 
 	const phaseInfo = usePhaseInfo(raceDate, totalWeeks);
 	const chartData = useWeeklyVolumeData(planEvents);
@@ -199,20 +204,30 @@ export default function Home() {
 			</aside>
 
 			<main className="flex-1 p-4 md:p-8 md:overflow-y-auto md:h-screen bg-slate-50">
-				{planEvents.length === 0 ? (
-					<EmptyState />
-				) : (
-					<div className="max-w-4xl mx-auto space-y-8 pb-32 md:pb-20">
-						<WeeklyVolumeChart data={chartData} />
-						<ActionBar
-							workoutCount={planEvents.length}
-							isUploading={isUploading}
-							onUpload={handleUpload}
-						/>
-						<StatusMessage message={statusMsg} />
-						<WorkoutList events={planEvents} />
-					</div>
-				)}
+				<div className="max-w-6xl mx-auto pb-32 md:pb-20">
+					<TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+
+					{activeTab === "planner" && (
+						<>
+							{planEvents.length === 0 ? (
+								<EmptyState />
+							) : (
+								<div className="space-y-8">
+									<WeeklyVolumeChart data={chartData} />
+									<ActionBar
+										workoutCount={planEvents.length}
+										isUploading={isUploading}
+										onUpload={handleUpload}
+									/>
+									<StatusMessage message={statusMsg} />
+									<WorkoutList events={planEvents} />
+								</div>
+							)}
+						</>
+					)}
+
+					{activeTab === "calendar" && <CalendarView apiKey={apiKey} />}
+				</div>
 			</main>
 		</div>
 	);

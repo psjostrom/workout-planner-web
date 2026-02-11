@@ -18,8 +18,8 @@ export function WeeklyVolumeChart({ data }: WeeklyVolumeChartProps) {
 			<h2 className="text-lg font-bold mb-6">
 				Weekly Volume (Estimated Minutes)
 			</h2>
-			<div className="h-64 w-full">
-				<ResponsiveContainer width="100%" height="100%">
+			<div className="h-64 w-full min-h-0">
+				<ResponsiveContainer width="100%" height="100%" minHeight={256}>
 					<BarChart data={data}>
 						<XAxis
 							dataKey="name"
