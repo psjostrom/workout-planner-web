@@ -123,7 +123,18 @@ async function fetchStreams(
 	apiKey: string,
 ): Promise<IntervalsStream[]> {
 	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	const keys = ["time", "bloodglucose", "glucose", "ga_smooth"].join(",");
+	const keys = [
+		"time",
+		"heartrate",
+		"bloodglucose",
+		"glucose",
+		"ga_smooth",
+		"pace",
+		"cadence",
+		"altitude",
+		"watts",
+		"power"
+	].join(",");
 	try {
 		const res = await fetch(
 			`${API_BASE}/activity/${activityId}/streams?keys=${keys}`,
@@ -534,6 +545,28 @@ export function generatePlan(
 }
 
 // --- CALENDAR TYPES ---
+export interface HRZoneData {
+	z1: number; // Time in seconds
+	z2: number;
+	z3: number;
+	z4: number;
+	z5: number;
+}
+
+export interface DataPoint {
+	time: number; // Minutes from start
+	value: number;
+}
+
+export interface StreamData {
+	glucose?: DataPoint[];
+	heartrate?: DataPoint[];
+	pace?: DataPoint[];
+	cadence?: DataPoint[];
+	altitude?: DataPoint[];
+	power?: DataPoint[];
+}
+
 export interface CalendarEvent {
 	id: string;
 	date: Date;
@@ -543,6 +576,144 @@ export interface CalendarEvent {
 	category: "long" | "interval" | "easy" | "race" | "other";
 	distance?: number;
 	duration?: number;
+	avgHr?: number;
+	maxHr?: number;
+	load?: number;
+	intensity?: number;
+	pace?: number; // min/km
+	hrZones?: HRZoneData;
+	streamData?: StreamData;
+}
+
+// Calculate HR zones based on LTHR
+function calculateHRZones(hrData: number[], lthr: number = DEFAULT_LTHR): HRZoneData {
+	const zones: HRZoneData = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
+
+	// Zone boundaries based on LTHR
+	const z1Max = lthr * 0.8;   // Up to 80% LTHR
+	const z2Max = lthr * 0.88;  // 80-88% LTHR
+	const z3Max = lthr * 0.94;  // 88-94% LTHR
+	const z4Max = lthr * 1.0;   // 94-100% LTHR
+	// z5 is > 100% LTHR
+
+	hrData.forEach(hr => {
+		if (hr <= z1Max) zones.z1++;
+		else if (hr <= z2Max) zones.z2++;
+		else if (hr <= z3Max) zones.z3++;
+		else if (hr <= z4Max) zones.z4++;
+		else zones.z5++;
+	});
+
+	return zones;
+}
+
+// Fetch detailed activity data including HR zones and all stream data
+async function fetchActivityDetails(
+	activityId: string,
+	apiKey: string,
+	lthr: number = DEFAULT_LTHR
+): Promise<{
+	hrZones?: HRZoneData;
+	streamData?: StreamData;
+	avgHr?: number;
+	maxHr?: number;
+}> {
+	const auth = "Basic " + btoa("API_KEY:" + apiKey);
+
+	try {
+		// Fetch streams
+		const streams = await fetchStreams(activityId, apiKey);
+
+		let timeData: number[] = [];
+		let hrData: number[] = [];
+		let glucoseData: number[] = [];
+		let paceData: number[] = [];
+		let cadenceData: number[] = [];
+		let altitudeData: number[] = [];
+		let powerData: number[] = [];
+
+		for (const s of streams) {
+			if (s.type === "time") timeData = s.data;
+			if (s.type === "heartrate") hrData = s.data;
+			if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
+				glucoseData = s.data;
+			}
+			if (s.type === "pace") paceData = s.data;
+			if (s.type === "cadence") cadenceData = s.data;
+			if (s.type === "altitude") altitudeData = s.data;
+			if (["watts", "power"].includes(s.type)) powerData = s.data;
+		}
+
+		const result: {
+			hrZones?: HRZoneData;
+			streamData?: StreamData;
+			avgHr?: number;
+			maxHr?: number;
+		} = {};
+
+		// Calculate HR zones if we have HR data
+		if (hrData.length > 0) {
+			result.hrZones = calculateHRZones(hrData, lthr);
+			result.avgHr = Math.round(hrData.reduce((a, b) => a + b, 0) / hrData.length);
+			result.maxHr = Math.round(Math.max(...hrData));
+		}
+
+		// Process all stream data
+		if (timeData.length > 0) {
+			const streamData: StreamData = {};
+
+			if (glucoseData.length > 0) {
+				streamData.glucose = timeData.map((t, idx) => ({
+					time: Math.round(t / 60), // Convert to minutes
+					value: glucoseData[idx] / 18.018, // Convert mg/dL to mmol/L
+				}));
+			}
+
+			if (hrData.length > 0) {
+				streamData.heartrate = timeData.map((t, idx) => ({
+					time: Math.round(t / 60),
+					value: hrData[idx],
+				}));
+			}
+
+			if (paceData.length > 0) {
+				streamData.pace = timeData.map((t, idx) => ({
+					time: Math.round(t / 60),
+					value: paceData[idx], // Already in min/km
+				}));
+			}
+
+			if (cadenceData.length > 0) {
+				streamData.cadence = timeData.map((t, idx) => ({
+					time: Math.round(t / 60),
+					value: cadenceData[idx],
+				}));
+			}
+
+			if (altitudeData.length > 0) {
+				streamData.altitude = timeData.map((t, idx) => ({
+					time: Math.round(t / 60),
+					value: altitudeData[idx],
+				}));
+			}
+
+			if (powerData.length > 0) {
+				streamData.power = timeData.map((t, idx) => ({
+					time: Math.round(t / 60),
+					value: powerData[idx],
+				}));
+			}
+
+			if (Object.keys(streamData).length > 0) {
+				result.streamData = streamData;
+			}
+		}
+
+		return result;
+	} catch (error) {
+		console.error("Failed to fetch activity details:", error);
+		return {};
+	}
 }
 
 // --- CALENDAR API ---
@@ -573,11 +744,30 @@ export async function fetchCalendarData(
 
 		const calendarEvents: CalendarEvent[] = [];
 
-		// Process completed activities
-		for (const activity of activities) {
-			if (activity.type !== "Run") continue;
+		// Filter run activities (including VirtualRun for treadmill runs)
+		const runActivities = activities.filter((a: any) =>
+			a.type === "Run" || a.type === "VirtualRun"
+		);
 
+		// Fetch detailed data for all activities in parallel (for better performance)
+		const detailsPromises = runActivities.map((activity: any) =>
+			fetchActivityDetails(activity.id, apiKey)
+		);
+		const allDetails = await Promise.all(detailsPromises);
+
+		// Process completed activities with their details
+		runActivities.forEach((activity: any, index: number) => {
 			const category = getWorkoutCategory(activity.name);
+			const details = allDetails[index];
+
+			// Calculate pace (min/km) if we have distance and duration
+			let pace: number | undefined;
+			if (activity.distance && activity.moving_time) {
+				const distanceKm = activity.distance / 1000;
+				const durationMin = activity.moving_time / 60;
+				pace = durationMin / distanceKm;
+			}
+
 			calendarEvents.push({
 				id: `activity-${activity.id}`,
 				date: parseISO(activity.start_date_local),
@@ -587,20 +777,44 @@ export async function fetchCalendarData(
 				category,
 				distance: activity.distance,
 				duration: activity.moving_time,
+				avgHr: details.avgHr || activity.average_hr,
+				maxHr: details.maxHr || activity.max_hr,
+				load: activity.icu_training_load,
+				intensity: activity.icu_intensity,
+				pace,
+				hrZones: details.hrZones,
+				streamData: details.streamData,
 			});
-		}
+		});
 
-		// Process planned events
+		// Process planned events (but skip ones that have been completed)
 		for (const event of events) {
 			if (event.category !== "WORKOUT") continue;
 
 			const name = event.name || "";
+			const eventDate = parseISO(event.start_date_local);
+
+			// Check if this event has a matching completed activity
+			// Match by name similarity and date proximity (same day)
+			const hasMatchingActivity = runActivities.some((activity: any) => {
+				const activityDate = parseISO(activity.start_date_local);
+				const sameDay = isSameDay(activityDate, eventDate);
+				const similarName = activity.name?.toLowerCase().includes(name.toLowerCase().substring(0, 10)) ||
+					name.toLowerCase().includes(activity.name?.toLowerCase().substring(0, 10));
+				return sameDay && similarName;
+			});
+
+			// Skip this event if it has been completed
+			if (hasMatchingActivity) {
+				continue;
+			}
+
 			const isRace = name.toLowerCase().includes("race");
 			const category = isRace ? "race" : getWorkoutCategory(name);
 
 			calendarEvents.push({
 				id: `event-${event.id}`,
-				date: parseISO(event.start_date_local),
+				date: eventDate,
 				name,
 				description: event.description || "",
 				type: isRace ? "race" : "planned",
