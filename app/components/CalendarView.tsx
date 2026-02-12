@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
 	format,
 	startOfMonth,
@@ -20,20 +21,17 @@ import { CalendarEvent, fetchCalendarData } from "@/lib/plannerLogic";
 import { HRZoneBar } from "./HRZoneBar";
 import { HRZoneBreakdown } from "./HRZoneBreakdown";
 import { WorkoutStreamGraph } from "./WorkoutStreamGraph";
-import { PhaseTracker } from "./PhaseTracker";
 import "../calendar.css";
 
 interface CalendarViewProps {
 	apiKey: string;
-	phaseName: string;
-	currentWeek: number;
-	totalWeeks: number;
-	progress: number;
 }
 
 type CalendarViewMode = 'month' | 'week' | 'agenda';
 
-export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progress }: CalendarViewProps) {
+export function CalendarView({ apiKey }: CalendarViewProps) {
+	const router = useRouter();
+	const searchParams = useSearchParams();
 	const [events, setEvents] = useState<CalendarEvent[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
@@ -75,6 +73,22 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 		loadCalendarData();
 	}, [apiKey, currentMonth, selectedWeek, viewMode]);
 
+	// Sync URL params with modal state
+	useEffect(() => {
+		const workoutId = searchParams.get('workout');
+
+		if (workoutId) {
+			// Find the event with this ID
+			const event = events.find(e => e.id === workoutId);
+			if (event) {
+				setSelectedEvent(event);
+			}
+		} else {
+			// No workout param, close modal
+			setSelectedEvent(null);
+		}
+	}, [searchParams, events]);
+
 	// Generate calendar grid
 	const calendarDays = useMemo(() => {
 		const monthStart = startOfMonth(currentMonth);
@@ -94,6 +108,18 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 	// Get events for a specific date
 	const getEventsForDate = (date: Date): CalendarEvent[] => {
 		return events.filter(event => isSameDay(event.date, date));
+	};
+
+	// Open modal by updating URL
+	const openWorkoutModal = (event: CalendarEvent) => {
+		const params = new URLSearchParams(searchParams.toString());
+		params.set('workout', event.id);
+		router.push(`?${params.toString()}`, { scroll: false });
+	};
+
+	// Close modal by removing URL param
+	const closeWorkoutModal = () => {
+		router.back();
 	};
 
 	// Get event style class
@@ -150,16 +176,6 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 
 	return (
 		<div className="max-w-7xl mx-auto">
-			{/* Phase Tracker */}
-			<div className="mb-4 sm:mb-6">
-				<PhaseTracker
-					phaseName={phaseName}
-					currentWeek={currentWeek}
-					totalWeeks={totalWeeks}
-					progress={progress}
-				/>
-			</div>
-
 			{/* Navigation */}
 			<div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-100 mb-4 sm:mb-6">
 				<div className="flex items-center justify-between mb-2">
@@ -281,7 +297,7 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 												{dayEvents.map((event) => (
 													<button
 														key={event.id}
-														onClick={() => setSelectedEvent(event)}
+														onClick={() => openWorkoutModal(event)}
 														className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
 													>
 														<span className="mr-0.5">{getEventIcon(event)}</span>
@@ -332,7 +348,7 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 												{dayEvents.map((event) => (
 													<button
 														key={event.id}
-														onClick={() => setSelectedEvent(event)}
+														onClick={() => openWorkoutModal(event)}
 														className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
 													>
 														<span className="mr-0.5">{getEventIcon(event)}</span>
@@ -356,12 +372,10 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 							</div>
 						) : (
 							agendaEvents.map((event) => {
-								const dateStr = format(event.date, "EEEE d MMMM", { locale: enGB });
-
 								return (
 									<div
 										key={event.id}
-										onClick={() => setSelectedEvent(event)}
+										onClick={() => openWorkoutModal(event)}
 										className="flex gap-4 p-4 hover:bg-slate-50 cursor-pointer rounded-lg transition border border-slate-100"
 									>
 										{/* Date */}
@@ -516,11 +530,11 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 			{selectedEvent && (
 				<div
 					className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-					onClick={() => setSelectedEvent(null)}
+					onClick={() => closeWorkoutModal()}
 				>
 					<div
 						className="bg-white rounded-xl p-4 sm:p-6 max-w-3xl w-full shadow-xl max-h-[90vh] overflow-y-auto"
-						onClick={(e) => e.stopPropagation()}
+						onClick={(e: React.MouseEvent) => e.stopPropagation()}
 					>
 						<div className="flex items-start justify-between mb-4">
 							<div>
@@ -541,7 +555,7 @@ export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progr
 								</div>
 							</div>
 							<button
-								onClick={() => setSelectedEvent(null)}
+								onClick={() => closeWorkoutModal()}
 								className="text-slate-400 hover:text-slate-600 text-xl"
 							>
 								✕

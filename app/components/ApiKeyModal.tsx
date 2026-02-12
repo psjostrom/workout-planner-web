@@ -1,0 +1,82 @@
+"use client";
+
+import { useState } from "react";
+import { Key } from "lucide-react";
+
+interface ApiKeyModalProps {
+  onApiKeySubmit: (key: string) => void;
+}
+
+export function ApiKeyModal({ onApiKeySubmit }: ApiKeyModalProps) {
+  const [apiKey, setApiKey] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKey.trim()) {
+      setError("API key is required");
+      return;
+    }
+    onApiKeySubmit(apiKey.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="bg-blue-100 p-3 rounded-lg">
+            <Key className="text-blue-600" size={24} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">
+              API Key Required
+            </h2>
+            <p className="text-sm text-slate-600">
+              Enter your Intervals.icu API key to continue
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label
+              htmlFor="apiKey"
+              className="block text-sm font-semibold text-slate-700 mb-2"
+            >
+              API Key
+            </label>
+            <input
+              id="apiKey"
+              type="text"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setError("");
+              }}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="API_KEY:your_key_here"
+              autoFocus
+            />
+            {error && <p className="text-sm text-red-600 mt-1">{error}</p>}
+          </div>
+
+          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-700">
+            <p className="font-semibold mb-1">How to get your API key:</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Go to intervals.icu</li>
+              <li>Navigate to Settings → Developer</li>
+              <li>Copy your API key</li>
+            </ol>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition"
+          >
+            Continue
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}

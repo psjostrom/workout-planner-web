@@ -1,11 +1,11 @@
 import {
-	addDays,
-	addWeeks,
-	format,
-	startOfWeek,
-	parseISO,
-	isBefore,
-	isSameDay,
+  addDays,
+  addWeeks,
+  format,
+  startOfWeek,
+  parseISO,
+  isBefore,
+  isSameDay,
 } from "date-fns";
 
 // --- CONSTANTS ---
@@ -17,898 +17,942 @@ export const API_BASE = "https://intervals.icu/api/v1";
 
 // --- TYPES ---
 export interface WorkoutEvent {
-	start_date_local: Date;
-	name: string;
-	description: string;
-	external_id: string;
-	type: "Run";
+  start_date_local: Date;
+  name: string;
+  description: string;
+  external_id: string;
+  type: "Run";
 }
 
 export interface AnalysisResult {
-	longRun: {
-		trend: number;
-		currentFuel: number;
-		plotData: { time: number; glucose: number }[];
-	} | null;
-	interval: {
-		trend: number;
-		currentFuel: number;
-		plotData: { time: number; glucose: number }[];
-	} | null;
-	msg?: string;
+  longRun: {
+    trend: number;
+    currentFuel: number;
+    plotData: { time: number; glucose: number }[];
+  } | null;
+  interval: {
+    trend: number;
+    currentFuel: number;
+    plotData: { time: number; glucose: number }[];
+  } | null;
+  msg?: string;
 }
 
 interface PlanContext {
-	fuelInterval: number; // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
-	fuelSteady: number; // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
-	raceDate: Date;
-	raceDist: number;
-	prefix: string;
-	totalWeeks: number;
-	startKm: number;
-	lthr: number;
-	planStartMonday: Date;
-	zones: {
-		easy: { min: number; max: number };
-		steady: { min: number; max: number };
-		tempo: { min: number; max: number };
-		hard: { min: number; max: number };
-	};
+  fuelInterval: number; // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
+  fuelSteady: number; // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
+  raceDate: Date;
+  raceDist: number;
+  prefix: string;
+  totalWeeks: number;
+  startKm: number;
+  lthr: number;
+  planStartMonday: Date;
+  zones: {
+    easy: { min: number; max: number };
+    steady: { min: number; max: number };
+    tempo: { min: number; max: number };
+    hard: { min: number; max: number };
+  };
 }
 
 // New interfaces to avoid 'any' in analysis
 interface IntervalsActivity {
-	id: string;
-	start_date: string;
-	name: string;
-	description?: string;
+  id: string;
+  start_date: string;
+  start_date_local?: string;
+  name: string;
+  description?: string;
+  type?: string;
+  distance?: number;
+  moving_time?: number;
+  total_elevation_gain?: number;
+  calories?: number;
+  avg_cadence?: number;
+  average_cadence?: number;
+  training_load?: number;
+  intensity?: number;
+  average_hr?: number;
+  max_hr?: number;
+  icu_training_load?: number;
+  icu_intensity?: number;
 }
 
 interface IntervalsStream {
-	type: string;
-	data: number[];
+  type: string;
+  data: number[];
 }
 
 // --- HELPER FUNCTIONS ---
 export const getEstimatedDuration = (event: WorkoutEvent): number => {
-	// 1. Long Run: Calculate 6 min/km (approximate trail pace)
-	if (event.name.includes("LR")) {
-		const match = event.name.match(/(\d+)km/);
-		if (match) return parseInt(match[1]) * 6;
-	}
+  // 1. Long Run: Calculate 6 min/km (approximate trail pace)
+  if (event.name.includes("LR")) {
+    const match = event.name.match(/(\d+)km/);
+    if (match) return parseInt(match[1]) * 6;
+  }
 
-	// 2. Default duration for other workouts (Easy, Tempo, Hills)
-	return 45;
+  // 2. Default duration for other workouts (Easy, Tempo, Hills)
+  return 45;
 };
 
 const formatStep = (
-	duration: string,
-	minPct: number,
-	maxPct: number,
-	lthr: number,
-	note?: string,
+  duration: string,
+  minPct: number,
+  maxPct: number,
+  lthr: number,
+  note?: string,
 ): string => {
-	const minBpm = Math.floor(lthr * minPct);
-	const maxBpm = Math.ceil(lthr * maxPct);
-	// Note comes first (for Garmin display), then duration, then zone
-	const core = `${duration} ${Math.floor(minPct * 100)}-${Math.ceil(maxPct * 100)}% LTHR (${minBpm}-${maxBpm} bpm)`;
-	return note ? `${note} ${core}` : core;
+  const minBpm = Math.floor(lthr * minPct);
+  const maxBpm = Math.ceil(lthr * maxPct);
+  // Note comes first (for Garmin display), then duration, then zone
+  const core = `${duration} ${Math.floor(minPct * 100)}-${Math.ceil(maxPct * 100)}% LTHR (${minBpm}-${maxBpm} bpm)`;
+  return note ? `${note} ${core}` : core;
 };
 
 const createWorkoutText = (
-	title: string,
-	warmup: string,
-	mainSteps: string[],
-	cooldown: string,
-	repeats: number = 1,
+  title: string,
+  warmup: string,
+  mainSteps: string[],
+  cooldown: string,
+  repeats: number = 1,
 ): string => {
-	return [
-		title,
-		"",
-		"Warmup",
-		`- ${warmup}`, // Added dash here since formatStep doesn't include it
-		"",
-		repeats > 1 ? `Main set ${repeats}x` : "Main set",
-		...mainSteps.map((s) => `- ${s}`),
-		"",
-		"Cooldown",
-		`- ${cooldown}`, // Added dash here
-		"",
-	].join("\n");
+  return [
+    title,
+    "",
+    "Warmup",
+    `- ${warmup}`, // Added dash here since formatStep doesn't include it
+    "",
+    repeats > 1 ? `Main set ${repeats}x` : "Main set",
+    ...mainSteps.map((s) => `- ${s}`),
+    "",
+    "Cooldown",
+    `- ${cooldown}`, // Added dash here
+    "",
+  ].join("\n");
 };
 
 // --- ANALYSIS LOGIC ---
 async function fetchStreams(
-	activityId: string,
-	apiKey: string,
+  activityId: string,
+  apiKey: string,
 ): Promise<IntervalsStream[]> {
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	const keys = [
-		"time",
-		"heartrate",
-		"bloodglucose",
-		"glucose",
-		"ga_smooth",
-		"pace",
-		"cadence",
-		"altitude",
-		"watts",
-		"power"
-	].join(",");
-	try {
-		const res = await fetch(
-			`${API_BASE}/activity/${activityId}/streams?keys=${keys}`,
-			{
-				headers: { Authorization: auth },
-			},
-		);
-		if (res.ok) return await res.json();
-		console.warn(`Failed to fetch streams for activity ${activityId}: ${res.status} ${res.statusText}`);
-		return [];
-	} catch (e) {
-		console.warn(`Error fetching streams for activity ${activityId}:`, e);
-		return [];
-	}
+  const auth = "Basic " + btoa("API_KEY:" + apiKey);
+  const keys = [
+    "time",
+    "heartrate",
+    "bloodglucose",
+    "glucose",
+    "ga_smooth",
+    "pace",
+    "cadence",
+    "altitude",
+    "watts",
+    "power",
+  ].join(",");
+  try {
+    const res = await fetch(
+      `${API_BASE}/activity/${activityId}/streams?keys=${keys}`,
+      {
+        headers: { Authorization: auth },
+      },
+    );
+    if (res.ok) return await res.json();
+    console.warn(
+      `Failed to fetch streams for activity ${activityId}: ${res.status} ${res.statusText}`,
+    );
+    return [];
+  } catch (e) {
+    console.warn(`Error fetching streams for activity ${activityId}:`, e);
+    return [];
+  }
 }
 
 // Categorize workout by type based on name
 function getWorkoutCategory(name: string): "long" | "interval" | "other" {
-	const lowerName = name.toLowerCase();
-	if (lowerName.includes("lr") || lowerName.includes("long")) return "long";
-	if (lowerName.includes("tempo") || lowerName.includes("hills"))
-		return "interval";
-	return "other";
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes("lr") || lowerName.includes("long")) return "long";
+  if (lowerName.includes("tempo") || lowerName.includes("hills"))
+    return "interval";
+  return "other";
 }
 
 async function analyzeRun(
-	run: IntervalsActivity,
-	apiKey: string,
+  run: IntervalsActivity,
+  apiKey: string,
 ): Promise<{
-	trend: number;
-	currentFuel: number;
-	plotData: { time: number; glucose: number }[];
+  trend: number;
+  currentFuel: number;
+  plotData: { time: number; glucose: number }[];
 }> {
-	const streams = await fetchStreams(run.id, apiKey);
-	let tData: number[] = [];
-	let gData: number[] = [];
+  const streams = await fetchStreams(run.id, apiKey);
+  let tData: number[] = [];
+  let gData: number[] = [];
 
-	for (const s of streams) {
-		if (s.type === "time") tData = s.data;
-		if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
-			gData = s.data;
-		}
-	}
+  for (const s of streams) {
+    if (s.type === "time") tData = s.data;
+    if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
+      gData = s.data;
+    }
+  }
 
-	let plotData: { time: number; glucose: number }[] = [];
-	let trend = 0.0;
-	let currentFuel = 10;
+  let plotData: { time: number; glucose: number }[] = [];
+  let trend = 0.0;
+  let currentFuel = 10;
 
-	// Get fuel from description
-	const match = run.description?.match(/FUEL:\s*(\d+)g/i);
-	if (match) currentFuel = parseInt(match[1]);
+  // Get fuel from description
+  const match = run.description?.match(/FUEL:\s*(\d+)g/i);
+  if (match) currentFuel = parseInt(match[1]);
 
-	if (gData.length > 0 && tData.length > 1) {
-		plotData = tData.map((t, idx) => ({
-			time: Math.round(t / 60),
-			glucose: gData[idx],
-		}));
-		const delta = gData[gData.length - 1] - gData[0];
-		const durationHr = (tData[tData.length - 1] - tData[0]) / 3600;
-		if (durationHr > 0.2) {
-			trend = delta / durationHr;
-		}
-	}
+  if (gData.length > 0 && tData.length > 1) {
+    plotData = tData.map((t, idx) => ({
+      time: Math.round(t / 60),
+      glucose: gData[idx],
+    }));
+    const delta = gData[gData.length - 1] - gData[0];
+    const durationHr = (tData[tData.length - 1] - tData[0]) / 3600;
+    if (durationHr > 0.2) {
+      trend = delta / durationHr;
+    }
+  }
 
-	return { trend, currentFuel, plotData };
+  return { trend, currentFuel, plotData };
 }
 
 export async function analyzeHistory(
-	apiKey: string,
-	prefix: string,
+  apiKey: string,
+  prefix: string,
 ): Promise<AnalysisResult> {
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	const today = new Date();
-	const startDate = addDays(today, -45);
-	const oldest = format(startDate, "yyyy-MM-dd");
-	const newest = format(today, "yyyy-MM-dd");
+  const auth = "Basic " + btoa("API_KEY:" + apiKey);
+  const today = new Date();
+  const startDate = addDays(today, -45);
+  const oldest = format(startDate, "yyyy-MM-dd");
+  const newest = format(today, "yyyy-MM-dd");
 
-	try {
-		const res = await fetch(
-			`${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
-			{ headers: { Authorization: auth } },
-		);
-		if (!res.ok) throw new Error("Failed to fetch activities");
-		const activities: IntervalsActivity[] = await res.json();
+  try {
+    const res = await fetch(
+      `${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
+      { headers: { Authorization: auth } },
+    );
+    if (!res.ok) throw new Error("Failed to fetch activities");
+    const activities: IntervalsActivity[] = await res.json();
 
-		const relevant = activities.filter((a) =>
-			a.name.toLowerCase().includes(prefix.toLowerCase()),
-		);
+    const relevant = activities.filter((a) =>
+      a.name.toLowerCase().includes(prefix.toLowerCase()),
+    );
 
-		if (relevant.length === 0) {
-			return { longRun: null, interval: null, msg: "No activities found" };
-		}
+    if (relevant.length === 0) {
+      return { longRun: null, interval: null, msg: "No activities found" };
+    }
 
-		// Sort by date (most recent first)
-		relevant.sort(
-			(a, b) =>
-				new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
-		);
+    // Sort by date (most recent first)
+    relevant.sort(
+      (a, b) =>
+        new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
+    );
 
-		// Find most recent Long run and Interval run
-		const mostRecentLong = relevant.find(
-			(a) => getWorkoutCategory(a.name) === "long",
-		);
-		const mostRecentInterval = relevant.find(
-			(a) => getWorkoutCategory(a.name) === "interval",
-		);
+    // Find most recent Long run and Interval run
+    const mostRecentLong = relevant.find(
+      (a) => getWorkoutCategory(a.name) === "long",
+    );
+    const mostRecentInterval = relevant.find(
+      (a) => getWorkoutCategory(a.name) === "interval",
+    );
 
-		const result: AnalysisResult = {
-			longRun: null,
-			interval: null,
-		};
+    const result: AnalysisResult = {
+      longRun: null,
+      interval: null,
+    };
 
-		// Analyze Long run if found
-		if (mostRecentLong) {
-			result.longRun = await analyzeRun(mostRecentLong, apiKey);
-		}
+    // Analyze Long run if found
+    if (mostRecentLong) {
+      result.longRun = await analyzeRun(mostRecentLong, apiKey);
+    }
 
-		// Analyze Interval run if found
-		if (mostRecentInterval) {
-			result.interval = await analyzeRun(mostRecentInterval, apiKey);
-		}
+    // Analyze Interval run if found
+    if (mostRecentInterval) {
+      result.interval = await analyzeRun(mostRecentInterval, apiKey);
+    }
 
-		return result;
-	} catch (error) {
-		console.error("Analysis failed", error);
-		return { longRun: null, interval: null, msg: "Analysis failed" };
-	}
+    return result;
+  } catch (error) {
+    console.error("Analysis failed", error);
+    return { longRun: null, interval: null, msg: "Analysis failed" };
+  }
 }
 
 // --- PLAN GENERATORS ---
 
 const generateQualityRun = (
-	ctx: PlanContext,
-	weekIdx: number,
-	weekStart: Date,
+  ctx: PlanContext,
+  weekIdx: number,
+  weekStart: Date,
 ): WorkoutEvent | null => {
-	const date = addDays(weekStart, 1);
-	if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
-		return null;
-	if (isSameDay(date, ctx.raceDate)) return null;
+  const date = addDays(weekStart, 1);
+  if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
+    return null;
+  if (isSameDay(date, ctx.raceDate)) return null;
 
-	const weekNum = weekIdx + 1;
-	const progress = weekIdx / ctx.totalWeeks;
-	const isRaceWeek = weekNum === ctx.totalWeeks;
-	const isRaceTest =
-		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
+  const weekNum = weekIdx + 1;
+  const progress = weekIdx / ctx.totalWeeks;
+  const isRaceWeek = weekNum === ctx.totalWeeks;
+  const isRaceTest =
+    weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-	const stratHard = `PUMP OFF - FUEL: ${ctx.fuelInterval}g/10m`; // Intervals use LOW fuel
-	// FIX: We add the strategy as a Note in formatStep, so it ends up first on the line
-	const wu = formatStep(
-		"10m",
-		ctx.zones.easy.min,
-		ctx.zones.easy.max,
-		ctx.lthr,
-		stratHard,
-	);
-	const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+  const stratHard = `PUMP OFF - FUEL: ${ctx.fuelInterval}g/10m`; // Intervals use LOW fuel
+  // FIX: We add the strategy as a Note in formatStep, so it ends up first on the line
+  const wu = formatStep(
+    "10m",
+    ctx.zones.easy.min,
+    ctx.zones.easy.max,
+    ctx.lthr,
+    stratHard,
+  );
+  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-	const prefixName = `W${weekNum.toString().padStart(2, "0")} Tue`;
-	const isTempo = weekIdx % 2 !== 0;
+  const prefixName = `W${weekNum.toString().padStart(2, "0")} Tue`;
+  const isTempo = weekIdx % 2 !== 0;
 
-	if (isTempo) {
-		const isShakeout = isRaceWeek;
-		const reps = isShakeout ? 2 : isRaceTest ? 3 : 3 + Math.floor(progress * 3);
-		const steps = isShakeout
-			? [
-					formatStep("5m", ctx.zones.tempo.min, ctx.zones.tempo.max, ctx.lthr),
-					formatStep("2m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr),
-				]
-			: [
-					formatStep("8m", ctx.zones.tempo.min, ctx.zones.tempo.max, ctx.lthr),
-					formatStep("2m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr),
-				];
-		return {
-			start_date_local: new Date(date.setHours(12, 0, 0)),
-			name: `${prefixName} Tempo ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
-			description: createWorkoutText(stratHard, wu, steps, cd, reps),
-			external_id: `${ctx.prefix}-tue-${weekNum}`,
-			type: "Run",
-		};
-	}
-	const isShakeout = isRaceWeek;
-	const reps = isShakeout ? 2 : isRaceTest ? 4 : 6;
-	const steps = [
-		formatStep(
-			"2m",
-			ctx.zones.hard.min,
-			ctx.zones.hard.max,
-			ctx.lthr,
-			"Uphill",
-		),
-		formatStep(
-			"2m",
-			ctx.zones.easy.min,
-			ctx.zones.easy.max,
-			ctx.lthr,
-			"Downhill",
-		),
-	];
-	return {
-		start_date_local: new Date(date.setHours(12, 0, 0)),
-		name: `${prefixName} Hills ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
-		description: createWorkoutText(stratHard, wu, steps, cd, reps),
-		external_id: `${ctx.prefix}-tue-${weekNum}`,
-		type: "Run",
-	};
+  if (isTempo) {
+    const isShakeout = isRaceWeek;
+    const reps = isShakeout ? 2 : isRaceTest ? 3 : 3 + Math.floor(progress * 3);
+    const steps = isShakeout
+      ? [
+          formatStep("5m", ctx.zones.tempo.min, ctx.zones.tempo.max, ctx.lthr),
+          formatStep("2m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr),
+        ]
+      : [
+          formatStep("8m", ctx.zones.tempo.min, ctx.zones.tempo.max, ctx.lthr),
+          formatStep("2m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr),
+        ];
+    return {
+      start_date_local: new Date(date.setHours(12, 0, 0)),
+      name: `${prefixName} Tempo ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
+      description: createWorkoutText(stratHard, wu, steps, cd, reps),
+      external_id: `${ctx.prefix}-tue-${weekNum}`,
+      type: "Run",
+    };
+  }
+  const isShakeout = isRaceWeek;
+  const reps = isShakeout ? 2 : isRaceTest ? 4 : 6;
+  const steps = [
+    formatStep(
+      "2m",
+      ctx.zones.hard.min,
+      ctx.zones.hard.max,
+      ctx.lthr,
+      "Uphill",
+    ),
+    formatStep(
+      "2m",
+      ctx.zones.easy.min,
+      ctx.zones.easy.max,
+      ctx.lthr,
+      "Downhill",
+    ),
+  ];
+  return {
+    start_date_local: new Date(date.setHours(12, 0, 0)),
+    name: `${prefixName} Hills ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
+    description: createWorkoutText(stratHard, wu, steps, cd, reps),
+    external_id: `${ctx.prefix}-tue-${weekNum}`,
+    type: "Run",
+  };
 };
 
 const generateEasyRun = (
-	ctx: PlanContext,
-	weekIdx: number,
-	weekStart: Date,
+  ctx: PlanContext,
+  weekIdx: number,
+  weekStart: Date,
 ): WorkoutEvent | null => {
-	const date = addDays(weekStart, 3);
-	if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
-		return null;
-	if (isSameDay(date, ctx.raceDate)) return null;
-	const weekNum = weekIdx + 1;
-	const progress = weekIdx / ctx.totalWeeks;
-	const isRaceWeek = weekNum === ctx.totalWeeks;
-	const isRaceTest =
-		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
+  const date = addDays(weekStart, 3);
+  if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
+    return null;
+  if (isSameDay(date, ctx.raceDate)) return null;
+  const weekNum = weekIdx + 1;
+  const progress = weekIdx / ctx.totalWeeks;
+  const isRaceWeek = weekNum === ctx.totalWeeks;
+  const isRaceTest =
+    weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Easy runs use MODERATE fuel
-	// FIX: Strategy here as well
-	const wu = formatStep(
-		"10m",
-		ctx.zones.easy.min,
-		ctx.zones.easy.max,
-		ctx.lthr,
-		stratEasy,
-	);
-	const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+  const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Easy runs use MODERATE fuel
+  // FIX: Strategy here as well
+  const wu = formatStep(
+    "10m",
+    ctx.zones.easy.min,
+    ctx.zones.easy.max,
+    ctx.lthr,
+    stratEasy,
+  );
+  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-	const duration = isRaceWeek
-		? 20
-		: isRaceTest
-			? 30
-			: 40 + Math.floor(progress * 20);
-	const name = `W${weekNum.toString().padStart(2, "0")} Thu Easy ${ctx.prefix}${isRaceWeek ? " [SHAKEOUT]" : ""}`;
-	return {
-		start_date_local: new Date(date.setHours(12, 0, 0)),
-		name,
-		description: createWorkoutText(
-			stratEasy,
-			wu,
-			[formatStep(`${duration}m`, ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr)],
-			cd,
-		),
-		external_id: `${ctx.prefix}-thu-${weekNum}`,
-		type: "Run",
-	};
+  const duration = isRaceWeek
+    ? 20
+    : isRaceTest
+      ? 30
+      : 40 + Math.floor(progress * 20);
+  const name = `W${weekNum.toString().padStart(2, "0")} Thu Easy ${ctx.prefix}${isRaceWeek ? " [SHAKEOUT]" : ""}`;
+  return {
+    start_date_local: new Date(date.setHours(12, 0, 0)),
+    name,
+    description: createWorkoutText(
+      stratEasy,
+      wu,
+      [
+        formatStep(
+          `${duration}m`,
+          ctx.zones.easy.min,
+          ctx.zones.easy.max,
+          ctx.lthr,
+        ),
+      ],
+      cd,
+    ),
+    external_id: `${ctx.prefix}-thu-${weekNum}`,
+    type: "Run",
+  };
 };
 
 const generateBonusRun = (
-	ctx: PlanContext,
-	weekIdx: number,
-	weekStart: Date,
+  ctx: PlanContext,
+  weekIdx: number,
+  weekStart: Date,
 ): WorkoutEvent | null => {
-	const date = addDays(weekStart, 5);
-	if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
-		return null;
-	if (isSameDay(date, ctx.raceDate)) return null;
-	const weekNum = weekIdx + 1;
+  const date = addDays(weekStart, 5);
+  if (!isBefore(date, ctx.raceDate) && !isSameDay(date, ctx.raceDate))
+    return null;
+  if (isSameDay(date, ctx.raceDate)) return null;
+  const weekNum = weekIdx + 1;
 
-	const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Bonus runs use MODERATE fuel
-	// FIX: Strategy here
-	const wu = formatStep(
-		"10m",
-		ctx.zones.easy.min,
-		ctx.zones.easy.max,
-		ctx.lthr,
-		stratEasy,
-	);
-	const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+  const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Bonus runs use MODERATE fuel
+  // FIX: Strategy here
+  const wu = formatStep(
+    "10m",
+    ctx.zones.easy.min,
+    ctx.zones.easy.max,
+    ctx.lthr,
+    stratEasy,
+  );
+  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-	const name = `W${weekNum.toString().padStart(2, "0")} Sat Bonus (Optional) ${ctx.prefix}`;
-	return {
-		start_date_local: new Date(date.setHours(12, 0, 0)),
-		name,
-		description: createWorkoutText(
-			stratEasy,
-			wu,
-			[formatStep("30m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr)],
-			cd,
-		),
-		external_id: `${ctx.prefix}-sat-${weekNum}`,
-		type: "Run",
-	};
+  const name = `W${weekNum.toString().padStart(2, "0")} Sat Bonus (Optional) ${ctx.prefix}`;
+  return {
+    start_date_local: new Date(date.setHours(12, 0, 0)),
+    name,
+    description: createWorkoutText(
+      stratEasy,
+      wu,
+      [formatStep("30m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr)],
+      cd,
+    ),
+    external_id: `${ctx.prefix}-sat-${weekNum}`,
+    type: "Run",
+  };
 };
 
 const generateLongRun = (
-	ctx: PlanContext,
-	weekIdx: number,
-	weekStart: Date,
+  ctx: PlanContext,
+  weekIdx: number,
+  weekStart: Date,
 ): WorkoutEvent | null => {
-	const weekNum = weekIdx + 1;
-	const isRaceWeek = weekNum === ctx.totalWeeks;
-	const stratLong = `PUMP OFF - FUEL: ${ctx.fuelSteady}g/10m`; // Long runs use HIGH fuel
-	if (isRaceWeek) {
-		return {
-			start_date_local: new Date(ctx.raceDate.setHours(10, 0, 0)),
-			name: `RACE DAY ${ctx.prefix}`,
-			description: `RACE DAY! ${ctx.raceDist}km. ${stratLong}\n\nGood luck!`,
-			external_id: `${ctx.prefix}-race`,
-			type: "Run",
-		};
-	}
-	const date = addDays(weekStart, 6);
-	if (!isBefore(date, ctx.raceDate)) return null;
-	const isTaper = weekNum === ctx.totalWeeks - 1;
-	const isRaceTest =
-		weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
-	const isRecoveryWeek = weekNum % 4 === 0;
-	let km = Math.min(
-		Math.floor(
-			ctx.startKm +
-				((ctx.raceDist - ctx.startKm) / Math.max(ctx.totalWeeks - 4, 1)) *
-					weekIdx,
-		),
-		ctx.raceDist,
-	);
-	let type = "";
-	if (isRecoveryWeek) {
-		km = ctx.startKm;
-		type = " [RECOVERY]";
-	}
-	if (isTaper) {
-		km = Math.floor(ctx.raceDist * 0.5);
-		type = " [TAPER]";
-	}
-	if (isRaceTest) {
-		km = ctx.raceDist;
-		type = " [RACE TEST]";
-	}
+  const weekNum = weekIdx + 1;
+  const isRaceWeek = weekNum === ctx.totalWeeks;
+  const stratLong = `PUMP OFF - FUEL: ${ctx.fuelSteady}g/10m`; // Long runs use HIGH fuel
+  if (isRaceWeek) {
+    return {
+      start_date_local: new Date(ctx.raceDate.setHours(10, 0, 0)),
+      name: `RACE DAY ${ctx.prefix}`,
+      description: `RACE DAY! ${ctx.raceDist}km. ${stratLong}\n\nGood luck!`,
+      external_id: `${ctx.prefix}-race`,
+      type: "Run",
+    };
+  }
+  const date = addDays(weekStart, 6);
+  if (!isBefore(date, ctx.raceDate)) return null;
+  const isTaper = weekNum === ctx.totalWeeks - 1;
+  const isRaceTest =
+    weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
+  const isRecoveryWeek = weekNum % 4 === 0;
+  let km = Math.min(
+    Math.floor(
+      ctx.startKm +
+        ((ctx.raceDist - ctx.startKm) / Math.max(ctx.totalWeeks - 4, 1)) *
+          weekIdx,
+    ),
+    ctx.raceDist,
+  );
+  let type = "";
+  if (isRecoveryWeek) {
+    km = ctx.startKm;
+    type = " [RECOVERY]";
+  }
+  if (isTaper) {
+    km = Math.floor(ctx.raceDist * 0.5);
+    type = " [TAPER]";
+  }
+  if (isRaceTest) {
+    km = ctx.raceDist;
+    type = " [RACE TEST]";
+  }
 
-	// FIX: Strategy here
-	const wu = formatStep(
-		"10m",
-		ctx.zones.easy.min,
-		ctx.zones.easy.max,
-		ctx.lthr,
-		stratLong,
-	);
-	const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+  // FIX: Strategy here
+  const wu = formatStep(
+    "10m",
+    ctx.zones.easy.min,
+    ctx.zones.easy.max,
+    ctx.lthr,
+    stratLong,
+  );
+  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-	return {
-		start_date_local: new Date(date.setHours(10, 0, 0)),
-		name: `W${weekNum.toString().padStart(2, "0")} Sun LR (${km}km)${type} ${ctx.prefix}`,
-		description: createWorkoutText(
-			`${stratLong} (Trail)`,
-			wu,
-			[
-				formatStep(
-					`${km}km`,
-					ctx.zones.steady.min,
-					ctx.zones.steady.max,
-					ctx.lthr,
-				),
-			],
-			cd,
-		),
-		external_id: `${ctx.prefix}-sun-${weekNum}`,
-		type: "Run",
-	};
+  return {
+    start_date_local: new Date(date.setHours(10, 0, 0)),
+    name: `W${weekNum.toString().padStart(2, "0")} Sun LR (${km}km)${type} ${ctx.prefix}`,
+    description: createWorkoutText(
+      `${stratLong} (Trail)`,
+      wu,
+      [
+        formatStep(
+          `${km}km`,
+          ctx.zones.steady.min,
+          ctx.zones.steady.max,
+          ctx.lthr,
+        ),
+      ],
+      cd,
+    ),
+    external_id: `${ctx.prefix}-sun-${weekNum}`,
+    type: "Run",
+  };
 };
 
 // --- MAIN ORCHESTRATOR ---
 export function generatePlan(
-	fuelInterval: number, // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
-	fuelSteady: number, // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
-	raceDateStr: string,
-	raceDist: number,
-	prefix: string,
-	totalWeeks: number,
-	startKm: number,
-	lthr: number,
+  fuelInterval: number, // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
+  fuelSteady: number, // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
+  raceDateStr: string,
+  raceDist: number,
+  prefix: string,
+  totalWeeks: number,
+  startKm: number,
+  lthr: number,
 ): WorkoutEvent[] {
-	const raceDate = parseISO(raceDateStr);
-	const today = new Date();
-	const ctx: PlanContext = {
-		fuelInterval,
-		fuelSteady,
-		raceDate,
-		raceDist,
-		prefix,
-		totalWeeks,
-		startKm,
-		lthr,
-		planStartMonday: addWeeks(
-			startOfWeek(raceDate, { weekStartsOn: 1 }),
-			-(totalWeeks - 1),
-		),
-		zones: {
-			easy: { min: 0.72, max: 0.8 },
-			steady: { min: 0.77, max: 0.84 },
-			tempo: { min: 0.88, max: 0.94 },
-			hard: { min: 0.95, max: 1.0 },
-		},
-	};
-	const weekIndices = Array.from({ length: totalWeeks }, (_, i) => i);
-	return weekIndices.flatMap((i) => {
-		const weekStart = addWeeks(ctx.planStartMonday, i);
-		if (isBefore(addDays(weekStart, 7), today)) return [];
-		return [
-			generateQualityRun(ctx, i, weekStart),
-			generateEasyRun(ctx, i, weekStart),
-			generateBonusRun(ctx, i, weekStart),
-			generateLongRun(ctx, i, weekStart),
-		].filter((e): e is WorkoutEvent => e !== null);
-	});
+  const raceDate = parseISO(raceDateStr);
+  const today = new Date();
+  const ctx: PlanContext = {
+    fuelInterval,
+    fuelSteady,
+    raceDate,
+    raceDist,
+    prefix,
+    totalWeeks,
+    startKm,
+    lthr,
+    planStartMonday: addWeeks(
+      startOfWeek(raceDate, { weekStartsOn: 1 }),
+      -(totalWeeks - 1),
+    ),
+    zones: {
+      easy: { min: 0.72, max: 0.8 },
+      steady: { min: 0.77, max: 0.84 },
+      tempo: { min: 0.88, max: 0.94 },
+      hard: { min: 0.95, max: 1.0 },
+    },
+  };
+  const weekIndices = Array.from({ length: totalWeeks }, (_, i) => i);
+  return weekIndices.flatMap((i) => {
+    const weekStart = addWeeks(ctx.planStartMonday, i);
+    if (isBefore(addDays(weekStart, 7), today)) return [];
+    return [
+      generateQualityRun(ctx, i, weekStart),
+      generateEasyRun(ctx, i, weekStart),
+      generateBonusRun(ctx, i, weekStart),
+      generateLongRun(ctx, i, weekStart),
+    ].filter((e): e is WorkoutEvent => e !== null);
+  });
 }
 
 // --- CALENDAR TYPES ---
 export interface HRZoneData {
-	z1: number; // Time in seconds
-	z2: number;
-	z3: number;
-	z4: number;
-	z5: number;
+  z1: number; // Time in seconds
+  z2: number;
+  z3: number;
+  z4: number;
+  z5: number;
 }
 
 export interface DataPoint {
-	time: number; // Minutes from start
-	value: number;
+  time: number; // Minutes from start
+  value: number;
 }
 
 export interface StreamData {
-	glucose?: DataPoint[];
-	heartrate?: DataPoint[];
-	pace?: DataPoint[];
-	cadence?: DataPoint[];
-	altitude?: DataPoint[];
-	power?: DataPoint[];
+  glucose?: DataPoint[];
+  heartrate?: DataPoint[];
+  pace?: DataPoint[];
+  cadence?: DataPoint[];
+  altitude?: DataPoint[];
+  power?: DataPoint[];
 }
 
 export interface CalendarEvent {
-	id: string;
-	date: Date;
-	name: string;
-	description: string;
-	type: "completed" | "planned" | "race";
-	category: "long" | "interval" | "easy" | "race" | "other";
-	distance?: number;
-	duration?: number;
-	avgHr?: number;
-	maxHr?: number;
-	load?: number;
-	intensity?: number;
-	pace?: number; // min/km
-	calories?: number;
-	cadence?: number; // spm (steps per minute)
-	hrZones?: HRZoneData;
-	streamData?: StreamData;
+  id: string;
+  date: Date;
+  name: string;
+  description: string;
+  type: "completed" | "planned" | "race";
+  category: "long" | "interval" | "easy" | "race" | "other";
+  distance?: number;
+  duration?: number;
+  avgHr?: number;
+  maxHr?: number;
+  load?: number;
+  intensity?: number;
+  pace?: number; // min/km
+  calories?: number;
+  cadence?: number; // spm (steps per minute)
+  hrZones?: HRZoneData;
+  streamData?: StreamData;
 }
 
 // Calculate HR zones based on LTHR
-function calculateHRZones(hrData: number[], lthr: number = DEFAULT_LTHR): HRZoneData {
-	const zones: HRZoneData = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
+function calculateHRZones(
+  hrData: number[],
+  lthr: number = DEFAULT_LTHR,
+): HRZoneData {
+  const zones: HRZoneData = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
 
-	// Zone boundaries based on LTHR
-	const z1Max = lthr * 0.8;   // Up to 80% LTHR
-	const z2Max = lthr * 0.88;  // 80-88% LTHR
-	const z3Max = lthr * 0.94;  // 88-94% LTHR
-	const z4Max = lthr * 1.0;   // 94-100% LTHR
-	// z5 is > 100% LTHR
+  // Zone boundaries based on LTHR
+  const z1Max = lthr * 0.8; // Up to 80% LTHR
+  const z2Max = lthr * 0.88; // 80-88% LTHR
+  const z3Max = lthr * 0.94; // 88-94% LTHR
+  const z4Max = lthr * 1.0; // 94-100% LTHR
+  // z5 is > 100% LTHR
 
-	hrData.forEach(hr => {
-		if (hr <= z1Max) zones.z1++;
-		else if (hr <= z2Max) zones.z2++;
-		else if (hr <= z3Max) zones.z3++;
-		else if (hr <= z4Max) zones.z4++;
-		else zones.z5++;
-	});
+  hrData.forEach((hr) => {
+    if (hr <= z1Max) zones.z1++;
+    else if (hr <= z2Max) zones.z2++;
+    else if (hr <= z3Max) zones.z3++;
+    else if (hr <= z4Max) zones.z4++;
+    else zones.z5++;
+  });
 
-	return zones;
+  return zones;
 }
 
 // Fetch detailed activity data including HR zones and all stream data
 async function fetchActivityDetails(
-	activityId: string,
-	apiKey: string,
-	lthr: number = DEFAULT_LTHR
+  activityId: string,
+  apiKey: string,
+  lthr: number = DEFAULT_LTHR,
 ): Promise<{
-	hrZones?: HRZoneData;
-	streamData?: StreamData;
-	avgHr?: number;
-	maxHr?: number;
+  hrZones?: HRZoneData;
+  streamData?: StreamData;
+  avgHr?: number;
+  maxHr?: number;
 }> {
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
+  try {
+    // Fetch streams
+    const streams = await fetchStreams(activityId, apiKey);
 
-	try {
-		// Fetch streams
-		const streams = await fetchStreams(activityId, apiKey);
+    let timeData: number[] = [];
+    let hrData: number[] = [];
+    let glucoseData: number[] = [];
+    let paceData: number[] = [];
+    let cadenceData: number[] = [];
+    let altitudeData: number[] = [];
+    let powerData: number[] = [];
 
-		let timeData: number[] = [];
-		let hrData: number[] = [];
-		let glucoseData: number[] = [];
-		let paceData: number[] = [];
-		let cadenceData: number[] = [];
-		let altitudeData: number[] = [];
-		let powerData: number[] = [];
+    for (const s of streams) {
+      if (s.type === "time") timeData = s.data;
+      if (s.type === "heartrate") hrData = s.data;
+      if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
+        glucoseData = s.data;
+      }
+      if (s.type === "pace") paceData = s.data;
+      if (s.type === "cadence") cadenceData = s.data;
+      if (s.type === "altitude") altitudeData = s.data;
+      if (["watts", "power"].includes(s.type)) powerData = s.data;
+    }
 
-		for (const s of streams) {
-			if (s.type === "time") timeData = s.data;
-			if (s.type === "heartrate") hrData = s.data;
-			if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
-				glucoseData = s.data;
-			}
-			if (s.type === "pace") paceData = s.data;
-			if (s.type === "cadence") cadenceData = s.data;
-			if (s.type === "altitude") altitudeData = s.data;
-			if (["watts", "power"].includes(s.type)) powerData = s.data;
-		}
+    const result: {
+      hrZones?: HRZoneData;
+      streamData?: StreamData;
+      avgHr?: number;
+      maxHr?: number;
+    } = {};
 
-		const result: {
-			hrZones?: HRZoneData;
-			streamData?: StreamData;
-			avgHr?: number;
-			maxHr?: number;
-		} = {};
+    // Calculate HR zones if we have HR data
+    if (hrData.length > 0) {
+      result.hrZones = calculateHRZones(hrData, lthr);
+      result.avgHr = Math.round(
+        hrData.reduce((a, b) => a + b, 0) / hrData.length,
+      );
+      result.maxHr = Math.round(Math.max(...hrData));
+    }
 
-		// Calculate HR zones if we have HR data
-		if (hrData.length > 0) {
-			result.hrZones = calculateHRZones(hrData, lthr);
-			result.avgHr = Math.round(hrData.reduce((a, b) => a + b, 0) / hrData.length);
-			result.maxHr = Math.round(Math.max(...hrData));
-		}
+    // Process all stream data
+    if (timeData.length > 0) {
+      const streamData: StreamData = {};
 
-		// Process all stream data
-		if (timeData.length > 0) {
-			const streamData: StreamData = {};
+      if (glucoseData.length > 0) {
+        streamData.glucose = timeData.map((t, idx) => ({
+          time: Math.round(t / 60), // Convert to minutes
+          value: glucoseData[idx] / 18.018, // Convert mg/dL to mmol/L
+        }));
+      }
 
-			if (glucoseData.length > 0) {
-				streamData.glucose = timeData.map((t, idx) => ({
-					time: Math.round(t / 60), // Convert to minutes
-					value: glucoseData[idx] / 18.018, // Convert mg/dL to mmol/L
-				}));
-			}
+      if (hrData.length > 0) {
+        streamData.heartrate = timeData.map((t, idx) => ({
+          time: Math.round(t / 60),
+          value: hrData[idx],
+        }));
+      }
 
-			if (hrData.length > 0) {
-				streamData.heartrate = timeData.map((t, idx) => ({
-					time: Math.round(t / 60),
-					value: hrData[idx],
-				}));
-			}
+      if (paceData.length > 0) {
+        streamData.pace = timeData.map((t, idx) => ({
+          time: Math.round(t / 60),
+          value: paceData[idx], // Already in min/km
+        }));
+      }
 
-			if (paceData.length > 0) {
-				streamData.pace = timeData.map((t, idx) => ({
-					time: Math.round(t / 60),
-					value: paceData[idx], // Already in min/km
-				}));
-			}
+      if (cadenceData.length > 0) {
+        streamData.cadence = timeData.map((t, idx) => ({
+          time: Math.round(t / 60),
+          value: cadenceData[idx] * 2, // Convert single-foot to total steps
+        }));
+      }
 
-			if (cadenceData.length > 0) {
-				streamData.cadence = timeData.map((t, idx) => ({
-					time: Math.round(t / 60),
-					value: cadenceData[idx] * 2, // Convert single-foot to total steps
-				}));
-			}
+      if (altitudeData.length > 0) {
+        streamData.altitude = timeData.map((t, idx) => ({
+          time: Math.round(t / 60),
+          value: altitudeData[idx],
+        }));
+      }
 
-			if (altitudeData.length > 0) {
-				streamData.altitude = timeData.map((t, idx) => ({
-					time: Math.round(t / 60),
-					value: altitudeData[idx],
-				}));
-			}
+      if (powerData.length > 0) {
+        streamData.power = timeData.map((t, idx) => ({
+          time: Math.round(t / 60),
+          value: powerData[idx],
+        }));
+      }
 
-			if (powerData.length > 0) {
-				streamData.power = timeData.map((t, idx) => ({
-					time: Math.round(t / 60),
-					value: powerData[idx],
-				}));
-			}
+      if (Object.keys(streamData).length > 0) {
+        result.streamData = streamData;
+      }
+    }
 
-			if (Object.keys(streamData).length > 0) {
-				result.streamData = streamData;
-			}
-		}
-
-		return result;
-	} catch (error) {
-		console.error("Failed to fetch activity details:", error);
-		return {};
-	}
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch activity details:", error);
+    return {};
+  }
 }
 
 // --- CALENDAR API ---
 export async function fetchCalendarData(
-	apiKey: string,
-	startDate: Date,
-	endDate: Date,
+  apiKey: string,
+  startDate: Date,
+  endDate: Date,
 ): Promise<CalendarEvent[]> {
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	const oldest = format(startDate, "yyyy-MM-dd");
-	const newest = format(endDate, "yyyy-MM-dd");
+  const auth = "Basic " + btoa("API_KEY:" + apiKey);
+  const oldest = format(startDate, "yyyy-MM-dd");
+  const newest = format(endDate, "yyyy-MM-dd");
 
-	try {
-		// Fetch both activities (completed) and events (planned) in parallel
-		const results = await Promise.allSettled([
-			fetch(
-				`${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
-				{ headers: { Authorization: auth } },
-			),
-			fetch(
-				`${API_BASE}/athlete/0/events?oldest=${oldest}&newest=${newest}`,
-				{ headers: { Authorization: auth } },
-			),
-		]);
+  try {
+    // Fetch both activities (completed) and events (planned) in parallel
+    const results = await Promise.allSettled([
+      fetch(
+        `${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
+        { headers: { Authorization: auth } },
+      ),
+      fetch(`${API_BASE}/athlete/0/events?oldest=${oldest}&newest=${newest}`, {
+        headers: { Authorization: auth },
+      }),
+    ]);
 
-		const activitiesRes = results[0].status === 'fulfilled' ? results[0].value : null;
-		const eventsRes = results[1].status === 'fulfilled' ? results[1].value : null;
+    const activitiesRes =
+      results[0].status === "fulfilled" ? results[0].value : null;
+    const eventsRes =
+      results[1].status === "fulfilled" ? results[1].value : null;
 
-		const activities = activitiesRes?.ok ? await activitiesRes.json() : [];
-		const events = eventsRes?.ok ? await eventsRes.json() : [];
+    const activities = activitiesRes?.ok ? await activitiesRes.json() : [];
+    const events = eventsRes?.ok ? await eventsRes.json() : [];
 
-		const calendarEvents: CalendarEvent[] = [];
+    const calendarEvents: CalendarEvent[] = [];
 
-		// Filter run activities (including VirtualRun for treadmill runs)
-		const runActivities = activities.filter((a: any) =>
-			a.type === "Run" || a.type === "VirtualRun"
-		);
+    // Filter run activities (including VirtualRun for treadmill runs)
+    const runActivities = activities.filter(
+      (a: IntervalsActivity) => a.type === "Run" || a.type === "VirtualRun",
+    );
 
-		// Fetch detailed data in smaller batches to avoid rate limiting
-		const batchSize = 3;
-		const allDetails: any[] = [];
+    // Fetch detailed data in smaller batches to avoid rate limiting
+    const batchSize = 3;
+    const allDetails: Array<{
+      hrZones?: HRZoneData;
+      streamData?: StreamData;
+      avgHr?: number;
+      maxHr?: number;
+    }> = [];
 
-		for (let i = 0; i < runActivities.length; i += batchSize) {
-			const batch = runActivities.slice(i, i + batchSize);
-			const batchPromises = batch.map((activity: any) =>
-				fetchActivityDetails(activity.id, apiKey)
-			);
-			const batchResults = await Promise.allSettled(batchPromises);
-			allDetails.push(...batchResults.map(r => r.status === 'fulfilled' ? r.value : {}));
+    for (let i = 0; i < runActivities.length; i += batchSize) {
+      const batch = runActivities.slice(i, i + batchSize);
+      const batchPromises = batch.map((activity: IntervalsActivity) =>
+        fetchActivityDetails(activity.id, apiKey),
+      );
+      const batchResults = await Promise.allSettled(batchPromises);
+      allDetails.push(
+        ...batchResults.map((r) => (r.status === "fulfilled" ? r.value : {})),
+      );
 
-			// Small delay between batches to avoid rate limiting
-			if (i + batchSize < runActivities.length) {
-				await new Promise(resolve => setTimeout(resolve, 100));
-			}
-		}
+      // Small delay between batches to avoid rate limiting
+      if (i + batchSize < runActivities.length) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
 
-		// Process completed activities with their details
-		runActivities.forEach((activity: any, index: number) => {
-			const category = getWorkoutCategory(activity.name);
-			const details = allDetails[index];
+    // Process completed activities with their details
+    runActivities.forEach((activity: IntervalsActivity, index: number) => {
+      const category = getWorkoutCategory(activity.name);
+      const details = allDetails[index];
 
-			// Calculate pace (min/km) if we have distance and duration
-			let pace: number | undefined;
-			if (activity.distance && activity.moving_time) {
-				const distanceKm = activity.distance / 1000;
-				const durationMin = activity.moving_time / 60;
-				pace = durationMin / distanceKm;
-			}
+      // Calculate pace (min/km) if we have distance and duration
+      let pace: number | undefined;
+      if (activity.distance && activity.moving_time) {
+        const distanceKm = activity.distance / 1000;
+        const durationMin = activity.moving_time / 60;
+        pace = durationMin / distanceKm;
+      }
 
-			calendarEvents.push({
-				id: `activity-${activity.id}`,
-				date: parseISO(activity.start_date_local),
-				name: activity.name,
-				description: activity.description || "",
-				type: "completed",
-				category,
-				distance: activity.distance,
-				duration: activity.moving_time,
-				avgHr: details.avgHr || activity.average_hr,
-				maxHr: details.maxHr || activity.max_hr,
-				load: activity.icu_training_load,
-				intensity: activity.icu_intensity,
-				pace,
-				calories: activity.calories,
-				cadence: activity.average_cadence ? activity.average_cadence * 2 : undefined, // Convert single-foot to total steps
-				hrZones: details.hrZones,
-				streamData: details.streamData,
-			});
-		});
+      calendarEvents.push({
+        id: `activity-${activity.id}`,
+        date: parseISO(activity.start_date_local || activity.start_date),
+        name: activity.name,
+        description: activity.description || "",
+        type: "completed",
+        category,
+        distance: activity.distance,
+        duration: activity.moving_time,
+        avgHr: details.avgHr || activity.average_hr,
+        maxHr: details.maxHr || activity.max_hr,
+        load: activity.icu_training_load,
+        intensity: activity.icu_intensity,
+        pace,
+        calories: activity.calories,
+        cadence: activity.average_cadence
+          ? activity.average_cadence * 2
+          : undefined, // Convert single-foot to total steps
+        hrZones: details.hrZones,
+        streamData: details.streamData,
+      });
+    });
 
-		// Process planned events (but skip ones that have been completed)
-		for (const event of events) {
-			if (event.category !== "WORKOUT") continue;
+    // Process planned events (but skip ones that have been completed)
+    for (const event of events) {
+      if (event.category !== "WORKOUT") continue;
 
-			const name = event.name || "";
-			const eventDate = parseISO(event.start_date_local);
+      const name = event.name || "";
+      const eventDate = parseISO(event.start_date_local);
 
-			// Check if this event has a matching completed activity
-			// Match by name similarity and date proximity (same day)
-			const hasMatchingActivity = runActivities.some((activity: any) => {
-				const activityDate = parseISO(activity.start_date_local);
-				const sameDay = isSameDay(activityDate, eventDate);
-				const similarName = activity.name?.toLowerCase().includes(name.toLowerCase().substring(0, 10)) ||
-					name.toLowerCase().includes(activity.name?.toLowerCase().substring(0, 10));
-				return sameDay && similarName;
-			});
+      // Check if this event has a matching completed activity
+      // Match by name similarity and date proximity (same day)
+      const hasMatchingActivity = runActivities.some(
+        (activity: IntervalsActivity) => {
+          const activityDate = parseISO(
+            activity.start_date_local || activity.start_date,
+          );
+          const sameDay = isSameDay(activityDate, eventDate);
+          const similarName =
+            activity.name
+              ?.toLowerCase()
+              .includes(name.toLowerCase().substring(0, 10)) ||
+            name
+              .toLowerCase()
+              .includes(activity.name?.toLowerCase().substring(0, 10));
+          return sameDay && similarName;
+        },
+      );
 
-			// Skip this event if it has been completed
-			if (hasMatchingActivity) {
-				continue;
-			}
+      // Skip this event if it has been completed
+      if (hasMatchingActivity) {
+        continue;
+      }
 
-			const isRace = name.toLowerCase().includes("race");
-			const category = isRace ? "race" : getWorkoutCategory(name);
+      const isRace = name.toLowerCase().includes("race");
+      const category = isRace ? "race" : getWorkoutCategory(name);
 
-			calendarEvents.push({
-				id: `event-${event.id}`,
-				date: eventDate,
-				name,
-				description: event.description || "",
-				type: isRace ? "race" : "planned",
-				category,
-			});
-		}
+      calendarEvents.push({
+        id: `event-${event.id}`,
+        date: eventDate,
+        name,
+        description: event.description || "",
+        type: isRace ? "race" : "planned",
+        category,
+      });
+    }
 
-		// Sort by date
-		calendarEvents.sort((a, b) => a.date.getTime() - b.date.getTime());
+    // Sort by date
+    calendarEvents.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-		return calendarEvents;
-	} catch (error) {
-		console.error("Failed to fetch calendar data:", error);
-		return [];
-	}
+    return calendarEvents;
+  } catch (error) {
+    console.error("Failed to fetch calendar data:", error);
+    return [];
+  }
 }
 
 // --- API UPLOAD ---
 export async function uploadToIntervals(
-	apiKey: string,
-	events: WorkoutEvent[],
-	prefix: string,
+  apiKey: string,
+  events: WorkoutEvent[],
 ): Promise<number> {
-	const auth = "Basic " + btoa("API_KEY:" + apiKey);
-	const todayStr = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
-	const endStr = format(addDays(new Date(), 365), "yyyy-MM-dd'T'HH:mm:ss");
+  const auth = "Basic " + btoa("API_KEY:" + apiKey);
+  const todayStr = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
+  const endStr = format(addDays(new Date(), 365), "yyyy-MM-dd'T'HH:mm:ss");
 
-	// Delete all future workouts with a single call
-	try {
-		console.log("Deleting all future workouts...");
-		const deleteRes = await fetch(
-			`${API_BASE}/athlete/0/events?oldest=${todayStr}&newest=${endStr}&category=WORKOUT`,
-			{
-				method: "DELETE",
-				headers: { Authorization: auth },
-			},
-		);
+  // Delete all future workouts with a single call
+  try {
+    console.log("Deleting all future workouts...");
+    const deleteRes = await fetch(
+      `${API_BASE}/athlete/0/events?oldest=${todayStr}&newest=${endStr}&category=WORKOUT`,
+      {
+        method: "DELETE",
+        headers: { Authorization: auth },
+      },
+    );
 
-		if (!deleteRes.ok) {
-			console.error(`Delete failed with status ${deleteRes.status}`);
-		}
-	} catch (deleteError) {
-		console.error("Error during deletion phase:", deleteError);
-		// Continue with upload even if deletion fails
-	}
+    if (!deleteRes.ok) {
+      console.error(`Delete failed with status ${deleteRes.status}`);
+    }
+  } catch (deleteError) {
+    console.error("Error during deletion phase:", deleteError);
+    // Continue with upload even if deletion fails
+  }
 
-	// Upload the new plan
-	const payload = events.map((e) => ({
-		category: "WORKOUT",
-		start_date_local: format(e.start_date_local, "yyyy-MM-dd'T'HH:mm:ss"),
-		name: e.name,
-		description: e.description,
-		external_id: e.external_id,
-		type: e.type,
-	}));
+  // Upload the new plan
+  const payload = events.map((e) => ({
+    category: "WORKOUT",
+    start_date_local: format(e.start_date_local, "yyyy-MM-dd'T'HH:mm:ss"),
+    name: e.name,
+    description: e.description,
+    external_id: e.external_id,
+    type: e.type,
+  }));
 
-	try {
-		const res = await fetch(`${API_BASE}/athlete/0/events/bulk?upsert=true`, {
-			method: "POST",
-			headers: { Authorization: auth, "Content-Type": "application/json" },
-			body: JSON.stringify(payload),
-		});
-		if (!res.ok) {
-			const errorText = await res.text();
-			throw new Error(`API Error ${res.status}: ${errorText}`);
-		}
-		return payload.length;
-	} catch (error) {
-		console.error("Upload failed:", error);
-		console.error("Payload size:", payload.length);
-		console.error("First event:", payload[0]);
-		throw error;
-	}
+  try {
+    const res = await fetch(`${API_BASE}/athlete/0/events/bulk?upsert=true`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`API Error ${res.status}: ${errorText}`);
+    }
+    return payload.length;
+  } catch (error) {
+    console.error("Upload failed:", error);
+    console.error("Payload size:", payload.length);
+    console.error("First event:", payload[0]);
+    throw error;
+  }
 }
