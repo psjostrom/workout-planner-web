@@ -15,6 +15,26 @@ export const SPIKE_RISE_RATE = 3.0;
 export const DEFAULT_CARBS_G = 10;
 export const API_BASE = "https://intervals.icu/api/v1";
 
+// Smart glucose conversion: converts mg/dL to mmol/L only when needed
+function convertGlucoseToMmol(values: number[], streamType: string): number[] {
+  if (values.length === 0) return values;
+
+  // Determine if values are in mg/dL based on value range
+  // mmol/L range: 3.9-10 (normal), up to ~15 (high)
+  // mg/dL range: 70-180 (normal), up to ~300+ (high)
+  // Use threshold of 15: anything above is definitely mg/dL
+  const avgValue = values.reduce((a, b) => a + b, 0) / values.length;
+  const maxValue = Math.max(...values);
+
+  // Only convert if values look like mg/dL (average > 15 OR max > 20)
+  const needsConversion = avgValue > 15 || maxValue > 20;
+
+  if (needsConversion) {
+    return values.map((v) => v / 18.018);
+  }
+  return values;
+}
+
 // --- TYPES ---
 export interface WorkoutEvent {
   start_date_local: Date;
@@ -184,13 +204,14 @@ async function fetchStreams(
 }
 
 // Categorize workout by type based on name
-function getWorkoutCategory(name: string): "long" | "interval" | "easy" | "other" {
+function getWorkoutCategory(
+  name: string,
+): "long" | "interval" | "easy" | "other" {
   const lowerName = name.toLowerCase();
   if (lowerName.includes("lr") || lowerName.includes("long")) return "long";
   if (lowerName.includes("tempo") || lowerName.includes("hills"))
     return "interval";
-  if (lowerName.includes("easy") || lowerName.includes("bonus"))
-    return "easy";
+  if (lowerName.includes("easy") || lowerName.includes("bonus")) return "easy";
   return "other";
 }
 
@@ -205,11 +226,13 @@ async function analyzeRun(
   const streams = await fetchStreams(run.id, apiKey);
   let tData: number[] = [];
   let gData: number[] = [];
+  let glucoseStreamType: string = "";
 
   for (const s of streams) {
     if (s.type === "time") tData = s.data;
     if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
       gData = s.data;
+      glucoseStreamType = s.type;
     }
   }
 
@@ -222,11 +245,14 @@ async function analyzeRun(
   if (match) currentFuel = parseInt(match[1]);
 
   if (gData.length > 0 && tData.length > 1) {
+    const glucoseInMmol = convertGlucoseToMmol(gData, glucoseStreamType);
+
     plotData = tData.map((t, idx) => ({
       time: Math.round(t / 60),
-      glucose: gData[idx],
+      glucose: glucoseInMmol[idx],
     }));
-    const delta = gData[gData.length - 1] - gData[0];
+
+    const delta = glucoseInMmol[glucoseInMmol.length - 1] - glucoseInMmol[0];
     const durationHr = (tData[tData.length - 1] - tData[0]) / 3600;
     if (durationHr > 0.2) {
       trend = delta / durationHr;
@@ -259,7 +285,12 @@ export async function analyzeHistory(
     );
 
     if (relevant.length === 0) {
-      return { longRun: null, easyRun: null, interval: null, msg: "No activities found" };
+      return {
+        longRun: null,
+        easyRun: null,
+        interval: null,
+        msg: "No activities found",
+      };
     }
 
     // Sort by date (most recent first)
@@ -270,10 +301,10 @@ export async function analyzeHistory(
 
     // Find most recent run from each category
     const mostRecentLong = relevant.find(
-      (a) => getWorkoutCategory(a.name) === "long"
+      (a) => getWorkoutCategory(a.name) === "long",
     );
     const mostRecentEasy = relevant.find(
-      (a) => getWorkoutCategory(a.name) === "easy"
+      (a) => getWorkoutCategory(a.name) === "easy",
     );
     const mostRecentInterval = relevant.find(
       (a) => getWorkoutCategory(a.name) === "interval",
@@ -301,7 +332,12 @@ export async function analyzeHistory(
     return result;
   } catch (error) {
     console.error("Analysis failed", error);
-    return { longRun: null, interval: null, msg: "Analysis failed" };
+    return {
+      easyRun: null,
+      longRun: null,
+      interval: null,
+      msg: "Analysis failed",
+    };
   }
 }
 
@@ -341,7 +377,7 @@ const generateQualityRun = (
 
     // Calculate total duration and carbs
     const repDuration = isShakeout ? 7 : 10; // 5m+2m or 8m+2m
-    const totalDuration = 10 + (reps * repDuration) + 5; // warmup + main + cooldown
+    const totalDuration = 10 + reps * repDuration + 5; // warmup + main + cooldown
     const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelInterval);
 
     const stratHard = `PUMP OFF - FUEL PER 10: ${ctx.fuelInterval}g TOTAL: ${totalCarbs}g`; // Intervals use LOW fuel
@@ -352,7 +388,12 @@ const generateQualityRun = (
       ctx.lthr,
       stratHard,
     );
-    const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+    const cd = formatStep(
+      "5m",
+      ctx.zones.easy.min,
+      ctx.zones.easy.max,
+      ctx.lthr,
+    );
 
     return {
       start_date_local: new Date(date.setHours(12, 0, 0)),
@@ -382,7 +423,7 @@ const generateQualityRun = (
   ];
 
   // Calculate total duration and carbs
-  const totalDuration = 10 + (reps * 4) + 5; // warmup + (reps * 4m) + cooldown
+  const totalDuration = 10 + reps * 4 + 5; // warmup + (reps * 4m) + cooldown
   const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelInterval);
 
   const stratHard = `PUMP OFF - FUEL PER 10: ${ctx.fuelInterval}g TOTAL: ${totalCarbs}g`; // Intervals use LOW fuel
@@ -515,7 +556,10 @@ const generateLongRun = (
     // Calculate total carbs for race day
     // Estimate duration: Race pace ~5.15 min/km (88-94% LTHR)
     const estimatedRaceDuration = ctx.raceDist * 5.15;
-    const totalCarbs = calculateWorkoutCarbs(estimatedRaceDuration, ctx.fuelLong);
+    const totalCarbs = calculateWorkoutCarbs(
+      estimatedRaceDuration,
+      ctx.fuelLong,
+    );
     const stratLong = `PUMP OFF - FUEL PER 10: ${ctx.fuelLong}g TOTAL: ${totalCarbs}g`; // Long runs use HIGH fuel
 
     return {
@@ -726,6 +770,7 @@ async function fetchActivityDetails(
     let timeData: number[] = [];
     let hrData: number[] = [];
     let glucoseData: number[] = [];
+    let glucoseStreamType: string = "";
     let paceData: number[] = [];
     let cadenceData: number[] = [];
     let altitudeData: number[] = [];
@@ -736,6 +781,7 @@ async function fetchActivityDetails(
       if (s.type === "heartrate") hrData = s.data;
       if (["bloodglucose", "glucose", "ga_smooth"].includes(s.type)) {
         glucoseData = s.data;
+        glucoseStreamType = s.type;
       }
       if (s.type === "pace") paceData = s.data;
       if (s.type === "cadence") cadenceData = s.data;
@@ -764,9 +810,13 @@ async function fetchActivityDetails(
       const streamData: StreamData = {};
 
       if (glucoseData.length > 0) {
+        const glucoseInMmol = convertGlucoseToMmol(
+          glucoseData,
+          glucoseStreamType,
+        );
         streamData.glucose = timeData.map((t, idx) => ({
           time: Math.round(t / 60), // Convert to minutes
-          value: glucoseData[idx] / 18.018, // Convert mg/dL to mmol/L
+          value: glucoseInMmol[idx],
         }));
       }
 
@@ -883,7 +933,6 @@ export async function fetchCalendarData(
     runActivities.forEach((activity: IntervalsActivity, index: number) => {
       const category = getWorkoutCategory(activity.name);
       const details = allDetails[index];
-
 
       // Calculate pace (min/km) if we have distance and duration
       let pace: number | undefined;

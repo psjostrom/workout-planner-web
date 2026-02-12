@@ -79,12 +79,12 @@ export function GlucoseGraph({ data }: GlucoseGraphProps) {
 					);
 				})}
 
-				{/* Target range zone (70-180 mg/dL) */}
+				{/* Target range zone (3.9-10 mmol/L) */}
 				<rect
 					x={padding.left}
-					y={scaleY(180)}
+					y={scaleY(10)}
 					width={chartWidth}
-					height={scaleY(70) - scaleY(180)}
+					height={scaleY(3.9) - scaleY(10)}
 					fill="#dcfce7"
 					opacity="0.3"
 				/>
@@ -119,7 +119,7 @@ export function GlucoseGraph({ data }: GlucoseGraphProps) {
 					fill="#64748b"
 					transform={`rotate(-90, 10, ${height / 2})`}
 				>
-					mg/dL
+					mmol/L
 				</text>
 			</svg>
 			<div className="flex justify-between text-xs text-slate-500 mt-1 px-12">
