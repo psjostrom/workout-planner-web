@@ -1,0 +1,17 @@
+/* Custom styles for calendar grid */
+
+.calendar-grid {
+  width: 100%;
+}
+
+/* Ensure grid cells are equal height */
+.calendar-grid > div > div {
+  display: grid;
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  .calendar-grid {
+    font-size: 0.875rem;
+  }
+}

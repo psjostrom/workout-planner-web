@@ -1,73 +1,103 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
+	format,
 	startOfMonth,
 	endOfMonth,
 	startOfWeek,
 	endOfWeek,
 	addDays,
-	format,
-	isSameMonth,
-	isSameDay,
 	addMonths,
 	subMonths,
+	isSameMonth,
+	isSameDay,
+	isToday
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { enGB } from "date-fns/locale";
+import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { CalendarEvent, fetchCalendarData } from "@/lib/plannerLogic";
 import { HRZoneBar } from "./HRZoneBar";
 import { HRZoneBreakdown } from "./HRZoneBreakdown";
 import { WorkoutStreamGraph } from "./WorkoutStreamGraph";
+import { PhaseTracker } from "./PhaseTracker";
+import "../calendar.css";
 
 interface CalendarViewProps {
 	apiKey: string;
+	phaseName: string;
+	currentWeek: number;
+	totalWeeks: number;
+	progress: number;
 }
 
-export function CalendarView({ apiKey }: CalendarViewProps) {
-	const [currentMonth, setCurrentMonth] = useState(new Date());
+type CalendarViewMode = 'month' | 'week' | 'agenda';
+
+export function CalendarView({ apiKey, phaseName, currentWeek, totalWeeks, progress }: CalendarViewProps) {
 	const [events, setEvents] = useState<CalendarEvent[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
-		null,
-	);
+	const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+	const [currentMonth, setCurrentMonth] = useState(new Date());
+	const [selectedWeek, setSelectedWeek] = useState(new Date());
+	const [error, setError] = useState<string | null>(null);
+	const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
 
+	// Fetch data when month or week changes
 	useEffect(() => {
 		if (!apiKey) return;
 
 		const loadCalendarData = async () => {
 			setIsLoading(true);
-			const monthStart = startOfMonth(currentMonth);
-			const monthEnd = endOfMonth(currentMonth);
+			setError(null);
+			try {
+				// Determine date range based on view mode
+				let startDate: Date, endDate: Date;
 
-			// Fetch data for current month plus buffer
-			const startDate = startOfWeek(monthStart);
-			const endDate = endOfWeek(monthEnd);
+				if (viewMode === 'week') {
+					const weekStart = startOfWeek(selectedWeek, { weekStartsOn: 1 });
+					startDate = addDays(weekStart, -7); // Load prev week too
+					endDate = addDays(weekStart, 13); // Load next week too
+				} else {
+					startDate = startOfMonth(subMonths(currentMonth, 1));
+					endDate = endOfMonth(addMonths(currentMonth, 1));
+				}
 
-			const data = await fetchCalendarData(apiKey, startDate, endDate);
-			setEvents(data);
-			setIsLoading(false);
+				const data = await fetchCalendarData(apiKey, startDate, endDate);
+				setEvents(data);
+			} catch (err) {
+				console.error('Error loading calendar data:', err);
+				setError('Failed to load calendar data. Please check your API key and try again.');
+			} finally {
+				setIsLoading(false);
+			}
 		};
 
 		loadCalendarData();
-	}, [apiKey, currentMonth]);
+	}, [apiKey, currentMonth, selectedWeek, viewMode]);
 
-	const monthStart = startOfMonth(currentMonth);
-	const monthEnd = endOfMonth(currentMonth);
-	const calendarStart = startOfWeek(monthStart);
-	const calendarEnd = endOfWeek(monthEnd);
+	// Generate calendar grid
+	const calendarDays = useMemo(() => {
+		const monthStart = startOfMonth(currentMonth);
+		const monthEnd = endOfMonth(currentMonth);
+		const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 }); // Monday
+		const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
 
-	const days: Date[] = [];
-	let day = calendarStart;
-	while (day <= calendarEnd) {
-		days.push(day);
-		day = addDays(day, 1);
-	}
+		const days: Date[] = [];
+		let day = calendarStart;
+		while (day <= calendarEnd) {
+			days.push(day);
+			day = addDays(day, 1);
+		}
+		return days;
+	}, [currentMonth]);
 
-	const getEventsForDay = (date: Date) => {
-		return events.filter((event) => isSameDay(event.date, date));
+	// Get events for a specific date
+	const getEventsForDate = (date: Date): CalendarEvent[] => {
+		return events.filter(event => isSameDay(event.date, date));
 	};
 
-	const getEventColor = (event: CalendarEvent) => {
+	// Get event style class
+	const getEventStyle = (event: CalendarEvent) => {
 		if (event.type === "race") return "bg-red-500 text-white";
 		if (event.type === "completed") {
 			if (event.category === "long") return "bg-green-600 text-white";
@@ -87,173 +117,398 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 		return "✓";
 	};
 
+	const navigateMonth = (direction: 'prev' | 'next') => {
+		setCurrentMonth(direction === 'prev' ? subMonths(currentMonth, 1) : addMonths(currentMonth, 1));
+	};
+
+	const navigateWeek = (direction: 'prev' | 'next') => {
+		setSelectedWeek(direction === 'prev' ? addDays(selectedWeek, -7) : addDays(selectedWeek, 7));
+	};
+
+	// Generate week days
+	const weekDays = useMemo(() => {
+		const weekStart = startOfWeek(selectedWeek, { weekStartsOn: 1 }); // Monday
+		const days: Date[] = [];
+		for (let i = 0; i < 7; i++) {
+			days.push(addDays(weekStart, i));
+		}
+		return days;
+	}, [selectedWeek]);
+
+	// Get events for current month, sorted by date for agenda view
+	const agendaEvents = useMemo(() => {
+		const monthStart = startOfMonth(currentMonth);
+		const monthEnd = endOfMonth(currentMonth);
+
+		return events
+			.filter(event => {
+				const eventDate = event.date;
+				return eventDate >= monthStart && eventDate <= monthEnd;
+			})
+			.sort((a, b) => a.date.getTime() - b.date.getTime());
+	}, [events, currentMonth]);
+
 	return (
-		<div className="max-w-6xl mx-auto">
-			{/* Month Navigation */}
-			<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6">
-				<div className="flex items-center justify-between">
-					<div>
-						<h2 className="text-2xl font-bold">
-							{format(currentMonth, "MMMM yyyy")}
-						</h2>
-						<p className="text-sm text-slate-500 mt-1">
-							💡 Navigate to past months to see completed workouts with HR zones & glucose data
-						</p>
-					</div>
-					<div className="flex gap-2">
-						<button
-							onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-							className="p-2 hover:bg-slate-100 rounded-lg transition"
-							title="Previous month"
-						>
-							<ChevronLeft size={20} />
-						</button>
-						<button
-							onClick={() => setCurrentMonth(new Date())}
-							className="px-4 py-2 hover:bg-slate-100 rounded-lg transition text-sm font-medium"
-						>
-							Today
-						</button>
-						<button
-							onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-							className="p-2 hover:bg-slate-100 rounded-lg transition"
-							title="Next month"
-						>
-							<ChevronRight size={20} />
-						</button>
-					</div>
+		<div className="max-w-7xl mx-auto">
+			{/* Phase Tracker */}
+			<div className="mb-4 sm:mb-6">
+				<PhaseTracker
+					phaseName={phaseName}
+					currentWeek={currentWeek}
+					totalWeeks={totalWeeks}
+					progress={progress}
+				/>
+			</div>
+
+			{/* Navigation */}
+			<div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-100 mb-4 sm:mb-6">
+				<div className="flex items-center justify-between mb-2">
+					<button
+						onClick={() => viewMode === 'week' ? navigateWeek('prev') : navigateMonth('prev')}
+						className="p-2 hover:bg-slate-100 rounded-lg transition"
+					>
+						<ChevronLeft size={20} />
+					</button>
+					<h2 className="text-xl sm:text-2xl font-bold">
+						{viewMode === 'week' ? (
+							<>
+								{format(weekDays[0], "d MMM", { locale: enGB })} - {format(weekDays[6], "d MMM yyyy", { locale: enGB })}
+							</>
+						) : (
+							format(currentMonth, "MMMM yyyy", { locale: enGB })
+						)}
+					</h2>
+					<button
+						onClick={() => viewMode === 'week' ? navigateWeek('next') : navigateMonth('next')}
+						className="p-2 hover:bg-slate-100 rounded-lg transition"
+					>
+						<ChevronRight size={20} />
+					</button>
+				</div>
+				<div className="flex items-center justify-center gap-2 mt-3">
+					<button
+						onClick={() => setViewMode('month')}
+						className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+							viewMode === 'month'
+								? 'bg-blue-600 text-white'
+								: 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+						}`}
+					>
+						Month
+					</button>
+					<button
+						onClick={() => setViewMode('week')}
+						className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+							viewMode === 'week'
+								? 'bg-blue-600 text-white'
+								: 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+						}`}
+					>
+						Week
+					</button>
+					<button
+						onClick={() => setViewMode('agenda')}
+						className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+							viewMode === 'agenda'
+								? 'bg-blue-600 text-white'
+								: 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+						}`}
+					>
+						Agenda
+					</button>
 				</div>
 			</div>
 
-			{/* Legend */}
-			<div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6">
-				<div className="flex items-center gap-6 text-xs">
-					<div className="font-semibold text-slate-700">Legend:</div>
-					<div className="flex items-center gap-2">
-						<div className="w-3 h-3 bg-green-600 rounded"></div>
-						<span>Completed Long Run (with HR & glucose data)</span>
-					</div>
-					<div className="flex items-center gap-2">
-						<div className="w-3 h-3 bg-purple-600 rounded"></div>
-						<span>Completed Interval/Tempo</span>
-					</div>
-					<div className="flex items-center gap-2">
-						<div className="w-3 h-3 bg-green-200 border border-green-300 rounded"></div>
-						<span>Planned Long Run</span>
-					</div>
-					<div className="flex items-center gap-2">
-						<div className="w-3 h-3 bg-purple-200 border border-purple-300 rounded"></div>
-						<span>Planned Interval/Tempo</span>
-					</div>
-				</div>
-			</div>
-
-			{/* Calendar Grid */}
-			<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+			{/* Calendar / Agenda */}
+			<div className="bg-white p-2 sm:p-6 rounded-xl shadow-sm border border-slate-100">
 				{isLoading && (
 					<div className="flex items-center justify-center py-12">
 						<Loader2 className="animate-spin text-slate-400" size={32} />
 					</div>
 				)}
 
-				{!isLoading && (
-					<>
-						{/* Weekday Headers */}
-						<div className="grid grid-cols-7 gap-2 mb-2">
-							{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-								<div
-									key={day}
-									className="text-center text-sm font-semibold text-slate-600 py-2"
-								>
+				{error && (
+					<div className="flex items-center justify-center py-12">
+						<div className="text-center">
+							<div className="text-red-600 font-semibold mb-2">⚠️ Error</div>
+							<div className="text-sm text-slate-600">{error}</div>
+							<button
+								onClick={() => {
+									setError(null);
+									setCurrentMonth(new Date(currentMonth));
+								}}
+								className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+							>
+								Retry
+							</button>
+						</div>
+					</div>
+				)}
+
+				{!isLoading && !error && viewMode === 'month' && (
+					<div className="calendar-grid">
+						{/* Day headers */}
+						<div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200">
+							{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+								<div key={day} className="bg-slate-50 p-2 text-center text-xs sm:text-sm font-semibold text-slate-600">
 									{day}
 								</div>
 							))}
 						</div>
 
-						{/* Calendar Days */}
-						<div className="grid grid-cols-7 gap-2">
-							{days.map((day, idx) => {
-								const dayEvents = getEventsForDay(day);
+						{/* Calendar days grid */}
+						<div className="grid grid-cols-7 gap-px bg-slate-200 border-x border-b border-slate-200 min-h-[500px]">
+							{calendarDays.map((day, idx) => {
+								const dayEvents = getEventsForDate(day);
 								const isCurrentMonth = isSameMonth(day, currentMonth);
-								const isToday = isSameDay(day, new Date());
+								const isTodayDate = isToday(day);
 
 								return (
 									<div
 										key={idx}
-										className={`min-h-32 border rounded-lg p-2 ${
-											isCurrentMonth
-												? "bg-white border-slate-200"
-												: "bg-slate-50 border-slate-100"
-										} ${isToday ? "ring-2 ring-blue-500" : ""}`}
+										className={`bg-white p-1 sm:p-2 min-h-[80px] sm:min-h-[120px] overflow-hidden ${
+											!isCurrentMonth ? 'opacity-40' : ''
+										} ${isTodayDate ? 'ring-2 ring-blue-500 ring-inset' : ''}`}
 									>
-										<div
-											className={`text-sm font-medium mb-1 ${
-												isCurrentMonth ? "text-slate-900" : "text-slate-400"
-											} ${isToday ? "text-blue-600 font-bold" : ""}`}
-										>
-											{format(day, "d")}
-										</div>
+										<div className="flex flex-col h-full">
+											<div className={`text-xs sm:text-sm mb-1 ${
+												isTodayDate ? 'font-bold text-blue-600' : 'text-slate-600'
+											}`}>
+												{format(day, 'd')}
+											</div>
 
-										<div className="space-y-1">
-											{dayEvents.map((event) => (
-												<button
-													key={event.id}
-													onClick={() => setSelectedEvent(event)}
-													className={`w-full text-left px-1.5 py-1 rounded text-xs ${getEventColor(event)} hover:opacity-80 transition space-y-1`}
-												>
-													<div className="font-medium truncate">
-														<span className="mr-1">{getEventIcon(event)}</span>
-														{event.name}
-													</div>
-													{event.type === "completed" && (
-														<>
-															<div className="flex gap-1 text-xs flex-wrap">
-																{event.duration && (
-																	<span className="bg-black bg-opacity-10 px-1 rounded">
-																		{Math.floor(event.duration / 60)}m
-																	</span>
-																)}
-																{event.distance && (
-																	<span className="bg-black bg-opacity-10 px-1 rounded">
-																		{(event.distance / 1000).toFixed(1)}km
-																	</span>
-																)}
-																{event.pace && (
-																	<span className="bg-black bg-opacity-10 px-1 rounded">
-																		{Math.floor(event.pace)}:{String(Math.round((event.pace % 1) * 60)).padStart(2, '0')}/km
-																	</span>
-																)}
-																{event.avgHr && (
-																	<span className="bg-black bg-opacity-10 px-1 rounded">
-																		♥ {event.avgHr}
-																	</span>
-																)}
-															</div>
-															{event.hrZones && (
-																<HRZoneBar
-																	z1={event.hrZones.z1}
-																	z2={event.hrZones.z2}
-																	z3={event.hrZones.z3}
-																	z4={event.hrZones.z4}
-																	z5={event.hrZones.z5}
-																	height="h-1.5"
-																/>
-															)}
-														</>
-													)}
-													{event.type === "planned" && event.duration && (
-														<div className="text-xs opacity-75">
-															{Math.floor(event.duration / 60)}m
-														</div>
-													)}
-												</button>
-											))}
+											<div className="flex-1 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+												{dayEvents.map((event) => (
+													<button
+														key={event.id}
+														onClick={() => setSelectedEvent(event)}
+														className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
+													>
+														<span className="mr-0.5">{getEventIcon(event)}</span>
+														<span className="hidden sm:inline">{event.name}</span>
+													</button>
+												))}
+											</div>
 										</div>
 									</div>
 								);
 							})}
 						</div>
-					</>
+					</div>
+				)}
+
+				{!isLoading && !error && viewMode === 'week' && (
+					<div className="calendar-grid">
+						{/* Day headers */}
+						<div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200">
+							{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+								<div key={day} className="bg-slate-50 p-2 text-center text-xs sm:text-sm font-semibold text-slate-600">
+									{day}
+								</div>
+							))}
+						</div>
+
+						{/* Week days grid */}
+						<div className="grid grid-cols-7 gap-px bg-slate-200 border-x border-b border-slate-200">
+							{weekDays.map((day, idx) => {
+								const dayEvents = getEventsForDate(day);
+								const isTodayDate = isToday(day);
+
+								return (
+									<div
+										key={idx}
+										className={`bg-white p-1 sm:p-2 min-h-[200px] sm:min-h-[300px] overflow-hidden ${
+											isTodayDate ? 'ring-2 ring-blue-500 ring-inset' : ''
+										}`}
+									>
+										<div className="flex flex-col h-full">
+											<div className={`text-xs sm:text-sm mb-1 ${
+												isTodayDate ? 'font-bold text-blue-600' : 'text-slate-600'
+											}`}>
+												{format(day, 'd MMM')}
+											</div>
+
+											<div className="flex-1 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+												{dayEvents.map((event) => (
+													<button
+														key={event.id}
+														onClick={() => setSelectedEvent(event)}
+														className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
+													>
+														<span className="mr-0.5">{getEventIcon(event)}</span>
+														<span className="hidden sm:inline">{event.name}</span>
+													</button>
+												))}
+											</div>
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				)}
+
+				{!isLoading && !error && viewMode === 'agenda' && (
+					<div className="space-y-2">
+						{agendaEvents.length === 0 ? (
+							<div className="text-center py-12 text-slate-500">
+								No workouts scheduled for this month
+							</div>
+						) : (
+							agendaEvents.map((event) => {
+								const dateStr = format(event.date, "EEEE d MMMM", { locale: enGB });
+
+								return (
+									<div
+										key={event.id}
+										onClick={() => setSelectedEvent(event)}
+										className="flex gap-4 p-4 hover:bg-slate-50 cursor-pointer rounded-lg transition border border-slate-100"
+									>
+										{/* Date */}
+										<div className="flex-shrink-0 text-center w-16 sm:w-20">
+											<div className="text-xs sm:text-sm text-slate-600 uppercase">
+												{format(event.date, "EEE", { locale: enGB })}
+											</div>
+											<div className="text-2xl sm:text-3xl font-bold text-slate-900">
+												{format(event.date, "d", { locale: enGB })}
+											</div>
+											<div className="text-xs text-slate-600">
+												{format(event.date, "MMM", { locale: enGB })}
+											</div>
+										</div>
+
+										{/* Event Details */}
+										<div className="flex-1 min-w-0">
+											<div className="flex items-start gap-2 mb-2 flex-wrap">
+												<div className="flex items-center gap-2 min-w-0 flex-1">
+													<span className="text-lg flex-shrink-0">{getEventIcon(event)}</span>
+													<h3 className={`font-semibold truncate px-2 py-0.5 rounded text-sm border ${
+														event.type === "completed"
+															? "bg-green-50 text-green-700 border-green-200 sm:bg-transparent sm:text-slate-900 sm:border-transparent sm:px-0 sm:py-0"
+															: event.type === "race"
+																? "bg-red-50 text-red-700 border-red-200 sm:bg-transparent sm:text-slate-900 sm:border-transparent sm:px-0 sm:py-0"
+																: "bg-blue-50 text-blue-700 border-blue-200 sm:bg-transparent sm:text-slate-900 sm:border-transparent sm:px-0 sm:py-0"
+													}`}>
+														{event.name}
+													</h3>
+												</div>
+												<span
+													className={`hidden sm:inline-block px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+														event.type === "completed"
+															? "bg-green-100 text-green-700"
+															: event.type === "race"
+																? "bg-red-100 text-red-700"
+																: "bg-blue-100 text-blue-700"
+													}`}
+												>
+													{event.type === "completed"
+														? "Completed"
+														: event.type === "race"
+															? "Race"
+															: "Planned"}
+												</span>
+											</div>
+
+											{event.type === "completed" && (
+												<>
+													{/* Stats Grid */}
+													<div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs sm:text-sm mb-2">
+														{event.distance && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{(event.distance / 1000).toFixed(2)} km
+																</span>
+															</div>
+														)}
+														{event.duration && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{Math.floor(event.duration / 60)} min
+																</span>
+															</div>
+														)}
+														{event.pace && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{Math.floor(event.pace)}:
+																	{String(Math.round((event.pace % 1) * 60)).padStart(2, "0")}
+																</span>
+																{" "}
+																/km
+															</div>
+														)}
+														{event.avgHr && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{event.avgHr}
+																</span>
+																{" "}
+																bpm
+															</div>
+														)}
+														{event.load && (
+															<div className="text-slate-600">
+																Load:{" "}
+																<span className="font-semibold text-slate-900">
+																	{Math.round(event.load)}
+																</span>
+															</div>
+														)}
+														{event.intensity !== undefined && (
+															<div className="text-slate-600">
+																IF:{" "}
+																<span className="font-semibold text-slate-900">
+																	{Math.round(event.intensity)}%
+																</span>
+															</div>
+														)}
+														{event.calories && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{event.calories}
+																</span>
+																{" "}
+																kcal
+															</div>
+														)}
+														{event.cadence && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{Math.round(event.cadence)}
+																</span>
+																{" "}
+																spm
+															</div>
+														)}
+													</div>
+
+													{/* HR Zones */}
+													{event.hrZones && (
+														<div className="mt-2">
+															<HRZoneBar
+																z1={event.hrZones.z1}
+																z2={event.hrZones.z2}
+																z3={event.hrZones.z3}
+																z4={event.hrZones.z4}
+																z5={event.hrZones.z5}
+																height="h-2"
+															/>
+														</div>
+													)}
+												</>
+											)}
+
+											{event.type === "planned" && event.description && (
+												<div className="text-sm text-slate-600 line-clamp-2">
+													{event.description}
+												</div>
+											)}
+										</div>
+									</div>
+								);
+							})
+						)}
+					</div>
 				)}
 			</div>
 
@@ -264,17 +519,19 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 					onClick={() => setSelectedEvent(null)}
 				>
 					<div
-						className="bg-white rounded-xl p-6 max-w-3xl w-full shadow-xl max-h-[90vh] overflow-y-auto"
+						className="bg-white rounded-xl p-4 sm:p-6 max-w-3xl w-full shadow-xl max-h-[90vh] overflow-y-auto"
 						onClick={(e) => e.stopPropagation()}
 					>
 						<div className="flex items-start justify-between mb-4">
 							<div>
 								<div className="text-sm text-slate-600 mb-1">
-									{format(selectedEvent.date, "EEEE, MMMM d, yyyy")}
+									{format(selectedEvent.date, "EEEE d MMMM yyyy 'at' HH:mm", { locale: enGB })}
 								</div>
-								<h3 className="text-xl font-bold">{selectedEvent.name}</h3>
+								<h3 className="text-lg sm:text-xl font-bold">
+									{selectedEvent.name}
+								</h3>
 								<div
-									className={`inline-block px-2 py-1 rounded text-xs font-medium mt-2 ${getEventColor(selectedEvent)}`}
+									className={`inline-block px-2 py-1 rounded text-xs font-medium mt-2 ${getEventStyle(selectedEvent)}`}
 								>
 									{selectedEvent.type === "completed"
 										? "✓ Completed"
@@ -285,14 +542,14 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 							</div>
 							<button
 								onClick={() => setSelectedEvent(null)}
-								className="text-slate-400 hover:text-slate-600"
+								className="text-slate-400 hover:text-slate-600 text-xl"
 							>
 								✕
 							</button>
 						</div>
 
 						{selectedEvent.description && (
-							<div className="bg-slate-50 rounded-lg p-4 mb-4">
+							<div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-4">
 								<div className="text-sm whitespace-pre-wrap">
 									{selectedEvent.description}
 								</div>
@@ -301,7 +558,7 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 
 						{selectedEvent.type === "completed" && (
 							<>
-								<div className="grid grid-cols-3 gap-4 text-sm mb-4">
+								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 text-sm mb-4">
 									{selectedEvent.distance && (
 										<div>
 											<div className="text-slate-600">Distance</div>
@@ -322,24 +579,36 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 										<div>
 											<div className="text-slate-600">Pace</div>
 											<div className="font-semibold">
-												{Math.floor(selectedEvent.pace)}:{String(Math.round((selectedEvent.pace % 1) * 60)).padStart(2, '0')}/km
+												{Math.floor(selectedEvent.pace)}:
+												{String(
+													Math.round((selectedEvent.pace % 1) * 60),
+												).padStart(2, "0")}
+												/km
 											</div>
+										</div>
+									)}
+									{selectedEvent.calories && (
+										<div>
+											<div className="text-slate-600">Calories</div>
+											<div className="font-semibold">{selectedEvent.calories} kcal</div>
+										</div>
+									)}
+									{selectedEvent.cadence && (
+										<div>
+											<div className="text-slate-600">Cadence</div>
+											<div className="font-semibold">{Math.round(selectedEvent.cadence)} spm</div>
 										</div>
 									)}
 									{selectedEvent.avgHr && (
 										<div>
 											<div className="text-slate-600">Avg HR</div>
-											<div className="font-semibold">
-												{selectedEvent.avgHr} bpm
-											</div>
+											<div className="font-semibold">{selectedEvent.avgHr} bpm</div>
 										</div>
 									)}
 									{selectedEvent.maxHr && (
 										<div>
 											<div className="text-slate-600">Max HR</div>
-											<div className="font-semibold">
-												{selectedEvent.maxHr} bpm
-											</div>
+											<div className="font-semibold">{selectedEvent.maxHr} bpm</div>
 										</div>
 									)}
 									{selectedEvent.load && (
@@ -350,11 +619,11 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 											</div>
 										</div>
 									)}
-									{selectedEvent.intensity && (
+									{selectedEvent.intensity !== undefined && (
 										<div>
 											<div className="text-slate-600">Intensity</div>
 											<div className="font-semibold">
-												{Math.round(selectedEvent.intensity * 100)}%
+												{Math.round(selectedEvent.intensity)}%
 											</div>
 										</div>
 									)}
@@ -375,11 +644,15 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 									</div>
 								)}
 
-								{selectedEvent.streamData && (
+								{selectedEvent.streamData && Object.keys(selectedEvent.streamData).length > 0 ? (
 									<div className="mb-4">
 										<WorkoutStreamGraph streamData={selectedEvent.streamData} />
 									</div>
-								)}
+								) : selectedEvent.type === "completed" ? (
+									<div className="text-sm text-slate-500 italic mt-4">
+										💡 Detailed workout data (graphs) not available for this activity
+									</div>
+								) : null}
 							</>
 						)}
 					</div>

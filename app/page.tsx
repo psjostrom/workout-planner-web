@@ -7,7 +7,6 @@ import {
 	analyzeHistory,
 	WorkoutEvent,
 } from "@/lib/plannerLogic";
-import { PhaseTracker } from "./components/PhaseTracker";
 import { ApiKeyInput } from "./components/ApiKeyInput";
 import { RaceSettings } from "./components/RaceSettings";
 import { PhysiologySettings } from "./components/PhysiologySettings";
@@ -140,20 +139,21 @@ export default function Home() {
 	};
 
 	return (
-		<div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans">
-			<aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 md:h-screen md:sticky md:top-0 md:overflow-y-auto shrink-0 z-20">
-				<div className="flex items-center gap-2 mb-2">
-					<h1 className="text-xl font-bold tracking-tight">🏃‍♂️‍➡️ Race Planner</h1>
+		<div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
+			{/* Tab Navigation - Always at top */}
+			<div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+				<div className="max-w-7xl mx-auto px-4 md:px-8 py-4">
+					<TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
 				</div>
+			</div>
 
-				<PhaseTracker
-					phaseName={phaseInfo.name}
-					currentWeek={phaseInfo.week}
-					totalWeeks={totalWeeks}
-					progress={phaseInfo.progress}
-				/>
+			<div className="flex flex-col md:flex-row flex-1">
+				<aside className={`w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 shrink-0 ${activeTab === 'calendar' ? 'hidden' : ''}`}>
+					<div className="flex items-center gap-2 mb-2">
+						<h1 className="text-xl font-bold tracking-tight">🏃‍♂️‍➡️ Race Planner</h1>
+					</div>
 
-				<div className="space-y-4">
+					<div className="space-y-4">
 					<ApiKeyInput
 						value={apiKey}
 						onChange={setApiKey}
@@ -203,11 +203,9 @@ export default function Home() {
 				</button>
 			</aside>
 
-			<main className="flex-1 p-4 md:p-8 md:overflow-y-auto md:h-screen bg-slate-50">
-				<div className="max-w-6xl mx-auto pb-32 md:pb-20">
-					<TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
-
-					{activeTab === "planner" && (
+				<main className="flex-1 p-4 md:p-8 bg-slate-50">
+					<div className="max-w-6xl mx-auto pb-32 md:pb-20">
+						{activeTab === "planner" && (
 						<>
 							{planEvents.length === 0 ? (
 								<EmptyState />
@@ -226,9 +224,18 @@ export default function Home() {
 						</>
 					)}
 
-					{activeTab === "calendar" && <CalendarView apiKey={apiKey} />}
-				</div>
-			</main>
+						{activeTab === "calendar" && (
+							<CalendarView
+								apiKey={apiKey}
+								phaseName={phaseInfo.name}
+								currentWeek={phaseInfo.week}
+								totalWeeks={totalWeeks}
+								progress={phaseInfo.progress}
+							/>
+						)}
+					</div>
+				</main>
+			</div>
 		</div>
 	);
 }

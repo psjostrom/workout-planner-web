@@ -161,7 +161,7 @@ export function WorkoutStreamGraph({ streamData }: WorkoutStreamGraphProps) {
 	return (
 		<div className="w-full">
 			{/* Stream selector checkboxes */}
-			<div className="flex gap-2 mb-3 flex-wrap">
+			<div className="flex gap-1.5 sm:gap-2 mb-3 flex-wrap">
 				{availableStreams.map((stream) => {
 					const config = streamConfigs[stream];
 					const isSelected = selectedStreams.includes(stream);
@@ -169,40 +169,41 @@ export function WorkoutStreamGraph({ streamData }: WorkoutStreamGraphProps) {
 						<button
 							key={stream}
 							onClick={() => toggleStream(stream)}
-							className={`px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-2 ${
+							className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1.5 sm:gap-2 ${
 								isSelected
 									? "bg-slate-800 text-white"
 									: "bg-slate-100 text-slate-700 hover:bg-slate-200"
 							}`}
 						>
 							<div
-								className="w-3 h-3 rounded-full"
+								className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full"
 								style={{
 									backgroundColor: isSelected ? config.color : "#cbd5e1",
 								}}
 							/>
-							{config.label}
+							<span className="hidden sm:inline">{config.label}</span>
+							<span className="sm:hidden">{config.label.split(' ')[0]}</span>
 						</button>
 					);
 				})}
 			</div>
 
 			{/* Legend showing current ranges */}
-			<div className="flex gap-4 mb-3 text-xs flex-wrap">
+			<div className="flex gap-2 sm:gap-4 mb-3 text-xs flex-wrap">
 				{streamPaths.map((path, idx) => {
 					if (!path) return null;
 					const { config, minValue, maxValue } = path;
 					const formatVal = config.formatValue || ((v: number) => v.toFixed(1));
 					return (
-						<div key={idx} className="flex items-center gap-2">
+						<div key={idx} className="flex items-center gap-1 sm:gap-2">
 							<div
-								className="w-2 h-2 rounded-full"
+								className="w-2 h-2 rounded-full flex-shrink-0"
 								style={{ backgroundColor: config.color }}
 							/>
-							<span className="font-medium" style={{ color: config.color }}>
+							<span className="font-medium text-xs" style={{ color: config.color }}>
 								{config.label}:
 							</span>
-							<span className="text-slate-600">
+							<span className="text-slate-600 text-xs whitespace-nowrap">
 								{formatVal(minValue)} - {formatVal(maxValue)} {config.unit}
 							</span>
 						</div>
@@ -211,7 +212,13 @@ export function WorkoutStreamGraph({ streamData }: WorkoutStreamGraphProps) {
 			</div>
 
 			{/* Graph */}
-			<svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+			<div className="overflow-x-auto">
+				<svg
+					width="100%"
+					height={height}
+					viewBox={`0 0 ${width} ${height}`}
+					className="min-w-[300px]"
+				>
 				{/* Grid lines */}
 				{Array.from({ length: 5 }).map((_, i) => {
 					const yPercent = i / 4;
@@ -289,7 +296,8 @@ export function WorkoutStreamGraph({ streamData }: WorkoutStreamGraphProps) {
 					Normalized (%)
 				</text>
 			</svg>
-			<div className="flex justify-between text-xs text-slate-500 mt-1 px-12">
+			</div>
+			<div className="flex justify-between text-xs text-slate-500 mt-1 px-6 sm:px-12">
 				<span>0m</span>
 				<span>{Math.round(maxTime / 2)}m</span>
 				<span>{maxTime}m</span>

@@ -138,13 +138,17 @@ async function fetchStreams(
 	try {
 		const res = await fetch(
 			`${API_BASE}/activity/${activityId}/streams?keys=${keys}`,
-			{ headers: { Authorization: auth } },
+			{
+				headers: { Authorization: auth },
+			},
 		);
 		if (res.ok) return await res.json();
+		console.warn(`Failed to fetch streams for activity ${activityId}: ${res.status} ${res.statusText}`);
+		return [];
 	} catch (e) {
-		console.error(e);
+		console.warn(`Error fetching streams for activity ${activityId}:`, e);
+		return [];
 	}
-	return [];
 }
 
 // Categorize workout by type based on name
@@ -581,6 +585,8 @@ export interface CalendarEvent {
 	load?: number;
 	intensity?: number;
 	pace?: number; // min/km
+	calories?: number;
+	cadence?: number; // spm (steps per minute)
 	hrZones?: HRZoneData;
 	streamData?: StreamData;
 }
@@ -686,7 +692,7 @@ async function fetchActivityDetails(
 			if (cadenceData.length > 0) {
 				streamData.cadence = timeData.map((t, idx) => ({
 					time: Math.round(t / 60),
-					value: cadenceData[idx],
+					value: cadenceData[idx] * 2, // Convert single-foot to total steps
 				}));
 			}
 
@@ -728,7 +734,7 @@ export async function fetchCalendarData(
 
 	try {
 		// Fetch both activities (completed) and events (planned) in parallel
-		const [activitiesRes, eventsRes] = await Promise.all([
+		const results = await Promise.allSettled([
 			fetch(
 				`${API_BASE}/athlete/0/activities?oldest=${oldest}&newest=${newest}`,
 				{ headers: { Authorization: auth } },
@@ -739,8 +745,11 @@ export async function fetchCalendarData(
 			),
 		]);
 
-		const activities = activitiesRes.ok ? await activitiesRes.json() : [];
-		const events = eventsRes.ok ? await eventsRes.json() : [];
+		const activitiesRes = results[0].status === 'fulfilled' ? results[0].value : null;
+		const eventsRes = results[1].status === 'fulfilled' ? results[1].value : null;
+
+		const activities = activitiesRes?.ok ? await activitiesRes.json() : [];
+		const events = eventsRes?.ok ? await eventsRes.json() : [];
 
 		const calendarEvents: CalendarEvent[] = [];
 
@@ -749,11 +758,23 @@ export async function fetchCalendarData(
 			a.type === "Run" || a.type === "VirtualRun"
 		);
 
-		// Fetch detailed data for all activities in parallel (for better performance)
-		const detailsPromises = runActivities.map((activity: any) =>
-			fetchActivityDetails(activity.id, apiKey)
-		);
-		const allDetails = await Promise.all(detailsPromises);
+		// Fetch detailed data in smaller batches to avoid rate limiting
+		const batchSize = 3;
+		const allDetails: any[] = [];
+
+		for (let i = 0; i < runActivities.length; i += batchSize) {
+			const batch = runActivities.slice(i, i + batchSize);
+			const batchPromises = batch.map((activity: any) =>
+				fetchActivityDetails(activity.id, apiKey)
+			);
+			const batchResults = await Promise.allSettled(batchPromises);
+			allDetails.push(...batchResults.map(r => r.status === 'fulfilled' ? r.value : {}));
+
+			// Small delay between batches to avoid rate limiting
+			if (i + batchSize < runActivities.length) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		}
 
 		// Process completed activities with their details
 		runActivities.forEach((activity: any, index: number) => {
@@ -782,6 +803,8 @@ export async function fetchCalendarData(
 				load: activity.icu_training_load,
 				intensity: activity.icu_intensity,
 				pace,
+				calories: activity.calories,
+				cadence: activity.average_cadence ? activity.average_cadence * 2 : undefined, // Convert single-foot to total steps
 				hrZones: details.hrZones,
 				streamData: details.streamData,
 			});
