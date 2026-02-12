@@ -27,10 +27,10 @@ function HomeContent() {
 
   const [showApiKeyModal, setShowApiKeyModal] = useState(!apiKey);
 
-  // Derive active tab from URL
+  // Derive active tab from URL (default to calendar)
   const tabParam = searchParams.get("tab");
   const activeTab: "planner" | "calendar" =
-    tabParam === "calendar" ? "calendar" : "planner";
+    tabParam === "planner" ? "planner" : "calendar";
 
   // Handle tab change via URL
   const handleTabChange = (tab: "planner" | "calendar") => {

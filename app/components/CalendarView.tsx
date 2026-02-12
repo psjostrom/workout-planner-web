@@ -38,7 +38,13 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 	const [currentMonth, setCurrentMonth] = useState(new Date());
 	const [selectedWeek, setSelectedWeek] = useState(new Date());
 	const [error, setError] = useState<string | null>(null);
-	const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+	const [viewMode, setViewMode] = useState<CalendarViewMode>(() => {
+		// Initialize based on screen size: mobile = agenda, desktop = month
+		if (typeof window !== 'undefined') {
+			return window.innerWidth < 768 ? 'agenda' : 'month';
+		}
+		return 'month';
+	});
 	const loadedRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 	const agendaScrollRef = useRef<HTMLDivElement>(null);
 	const [isLoadingMore, setIsLoadingMore] = useState(false);
