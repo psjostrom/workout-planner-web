@@ -14,16 +14,22 @@ interface AnalysisSectionProps {
 		trend: number;
 		plotData: { time: number; glucose: number }[];
 	} | null;
+	easyRunAnalysis: {
+		trend: number;
+		plotData: { time: number; glucose: number }[];
+	} | null;
 	intervalAnalysis: {
 		trend: number;
 		plotData: { time: number; glucose: number }[];
 	} | null;
 	fuelInterval: number;
-	fuelSteady: number;
+	fuelLong: number;
+	fuelEasy: number;
 	isAnalyzing: boolean;
 	onAnalyze: () => void;
 	onFuelIntervalChange: (value: number) => void;
-	onFuelSteadyChange: (value: number) => void;
+	onFuelLongChange: (value: number) => void;
+	onFuelEasyChange: (value: number) => void;
 }
 
 function GlucoseChart({
@@ -93,15 +99,21 @@ function GlucoseChart({
 export function AnalysisSection({
 	prefix,
 	longRunAnalysis,
+	easyRunAnalysis,
 	intervalAnalysis,
 	fuelInterval,
-	fuelSteady,
+	fuelLong,
+	fuelEasy,
 	isAnalyzing,
 	onAnalyze,
 	onFuelIntervalChange,
-	onFuelSteadyChange,
+	onFuelLongChange,
+	onFuelEasyChange,
 }: AnalysisSectionProps) {
-	const hasAnalysis = longRunAnalysis !== null || intervalAnalysis !== null;
+	const hasAnalysis =
+		longRunAnalysis !== null ||
+		easyRunAnalysis !== null ||
+		intervalAnalysis !== null;
 	return (
 		<div className="bg-slate-100 p-4 rounded-lg">
 			<h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
@@ -126,11 +138,11 @@ export function AnalysisSection({
 							/>
 							<div className="flex justify-between items-center text-xs bg-white p-2 rounded border border-slate-200 gap-2">
 								<div className="flex items-center gap-1 shrink-0">
-									<span className="text-slate-600">Long/Easy:</span>
+									<span className="text-slate-600">Long:</span>
 									<input
 										type="number"
-										value={fuelSteady}
-										onChange={(e) => onFuelSteadyChange(Number(e.target.value))}
+										value={fuelLong}
+										onChange={(e) => onFuelLongChange(Number(e.target.value))}
 										className="w-10 p-1 text-center text-sm font-bold border rounded"
 									/>
 									<span className="text-slate-500">g/10m</span>
@@ -141,10 +153,48 @@ export function AnalysisSection({
 										className={
 											longRunAnalysis.trend < -3
 												? "text-red-600 font-bold"
-												: "text-green-600"
+												: longRunAnalysis.trend > 3
+													? "text-orange-600 font-bold"
+													: "text-green-600"
 										}
 									>
 										{longRunAnalysis.trend.toFixed(1)}
+									</span>
+								</div>
+							</div>
+						</div>
+					)}
+
+					{/* Easy Run Analysis */}
+					{easyRunAnalysis && (
+						<div className="space-y-2">
+							<GlucoseChart
+								plotData={easyRunAnalysis.plotData}
+								title="Last Easy Run"
+							/>
+							<div className="flex justify-between items-center text-xs bg-white p-2 rounded border border-slate-200 gap-2">
+								<div className="flex items-center gap-1 shrink-0">
+									<span className="text-slate-600">Easy:</span>
+									<input
+										type="number"
+										value={fuelEasy}
+										onChange={(e) => onFuelEasyChange(Number(e.target.value))}
+										className="w-10 p-1 text-center text-sm font-bold border rounded"
+									/>
+									<span className="text-slate-500">g/10m</span>
+								</div>
+								<div className="flex items-center gap-1 shrink-0">
+									<span className="text-slate-600">Trend:</span>
+									<span
+										className={
+											easyRunAnalysis.trend < -3
+												? "text-red-600 font-bold"
+												: easyRunAnalysis.trend > 3
+													? "text-orange-600 font-bold"
+													: "text-green-600"
+										}
+									>
+										{easyRunAnalysis.trend.toFixed(1)}
 									</span>
 								</div>
 							</div>

@@ -29,6 +29,69 @@ interface CalendarViewProps {
 
 type CalendarViewMode = 'month' | 'week' | 'agenda';
 
+// Helper to extract fuel rate from description (e.g., "FUEL: 10g/10m" -> 10)
+const extractFuelRate = (description: string): number | null => {
+	// Try new format first: FUEL PER 10: 10g
+	const newMatch = description.match(/FUEL PER 10:\s*(\d+)g/i);
+	if (newMatch) return parseInt(newMatch[1]);
+
+	// Fall back to old format for backward compatibility: FUEL: 10g/10m
+	const oldMatch = description.match(/FUEL:\s*(\d+)g\/10m/i);
+	return oldMatch ? parseInt(oldMatch[1]) : null;
+};
+
+const extractTotalCarbs = (description: string): number | null => {
+	// Extract total carbs from new format: TOTAL: 63g
+	const match = description.match(/TOTAL:\s*(\d+)g/i);
+	return match ? parseInt(match[1]) : null;
+};
+
+// Helper to estimate pace from average HR (min/km)
+const estimatePaceFromHR = (avgHr: number, lthr: number = 169): number => {
+	const hrPercent = avgHr / lthr;
+
+	// Zone 1 (72-80% LTHR): ~7:00-6:30 min/km
+	if (hrPercent < 0.80) return 6.75;
+	// Zone 2 (77-84% LTHR): ~6:30-6:00 min/km
+	if (hrPercent < 0.84) return 6.15;
+	// Zone 3-4 (88-94% LTHR): ~5:30-5:00 min/km
+	if (hrPercent < 0.94) return 5.15;
+	// Zone 5 (>94% LTHR): ~5:00-4:30 min/km
+	return 4.75;
+};
+
+// Calculate total carbs for an event
+const calculateTotalCarbs = (event: CalendarEvent): number | null => {
+	// First, try to extract total carbs directly from description (new format)
+	const totalFromDesc = extractTotalCarbs(event.description);
+	if (totalFromDesc) return totalFromDesc;
+
+	// Fall back to calculating from fuel rate and duration (backward compatibility)
+	const fuelRate = extractFuelRate(event.description);
+	if (!fuelRate) return null;
+
+	let durationMinutes: number;
+
+	if (event.duration) {
+		// Use actual duration if available
+		durationMinutes = event.duration / 60;
+	} else if (event.distance && event.avgHr) {
+		// Estimate duration from distance and HR
+		const distanceKm = event.distance / 1000;
+		const paceMinPerKm = estimatePaceFromHR(event.avgHr);
+		durationMinutes = distanceKm * paceMinPerKm;
+	} else if (event.distance) {
+		// Fallback: assume 6 min/km pace
+		const distanceKm = event.distance / 1000;
+		durationMinutes = distanceKm * 6;
+	} else {
+		return null;
+	}
+
+	// Calculate total carbs: (duration / 10 minutes) * fuel rate
+	return Math.round((durationMinutes / 10) * fuelRate);
+};
+
 export function CalendarView({ apiKey }: CalendarViewProps) {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -38,16 +101,28 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 	const [currentMonth, setCurrentMonth] = useState(new Date());
 	const [selectedWeek, setSelectedWeek] = useState(new Date());
 	const [error, setError] = useState<string | null>(null);
-	const [viewMode, setViewMode] = useState<CalendarViewMode>(() => {
-		// Initialize based on screen size: mobile = agenda, desktop = month
-		if (typeof window !== 'undefined') {
-			return window.innerWidth < 768 ? 'agenda' : 'month';
-		}
-		return 'month';
-	});
+	const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
 	const loadedRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 	const agendaScrollRef = useRef<HTMLDivElement>(null);
 	const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+	// Set responsive view mode after hydration to avoid SSR mismatch
+	useEffect(() => {
+		const isMobile = window.innerWidth < 768;
+		setViewMode(isMobile ? 'agenda' : 'month');
+	}, []);
+
+	// Handle Escape key to close modal
+	useEffect(() => {
+		const handleEscape = (e: KeyboardEvent) => {
+			if (e.key === "Escape" && selectedEvent) {
+				setSelectedEvent(null);
+			}
+		};
+
+		window.addEventListener("keydown", handleEscape);
+		return () => window.removeEventListener("keydown", handleEscape);
+	}, [selectedEvent]);
 
 	// Fetch data only when navigating outside loaded range
 	useEffect(() => {
@@ -565,6 +640,15 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 																spm
 															</div>
 														)}
+														{calculateTotalCarbs(event) && (
+															<div className="text-slate-600">
+																<span className="font-semibold text-slate-900">
+																	{calculateTotalCarbs(event)}g
+																</span>
+																{" "}
+																carbs
+															</div>
+														)}
 													</div>
 
 													{/* HR Zones */}
@@ -648,6 +732,15 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 							</div>
 						)}
 
+						{selectedEvent.type === "planned" && calculateTotalCarbs(selectedEvent) && (
+							<div className="mb-4">
+								<div className="text-sm text-slate-600 mb-1">Estimated Carbs</div>
+								<div className="text-lg font-semibold text-slate-900">
+									{calculateTotalCarbs(selectedEvent)}g
+								</div>
+							</div>
+						)}
+
 						{selectedEvent.type === "completed" && (
 							<>
 								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 text-sm mb-4">
@@ -689,6 +782,12 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
 										<div>
 											<div className="text-slate-600">Cadence</div>
 											<div className="font-semibold">{Math.round(selectedEvent.cadence)} spm</div>
+										</div>
+									)}
+									{calculateTotalCarbs(selectedEvent) && (
+										<div>
+											<div className="text-slate-600">Carbs</div>
+											<div className="font-semibold">{calculateTotalCarbs(selectedEvent)}g</div>
 										</div>
 									)}
 									{selectedEvent.avgHr && (

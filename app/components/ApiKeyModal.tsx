@@ -1,15 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Key } from "lucide-react";
 
 interface ApiKeyModalProps {
   onApiKeySubmit: (key: string) => void;
+  onClose?: () => void;
 }
 
-export function ApiKeyModal({ onApiKeySubmit }: ApiKeyModalProps) {
+export function ApiKeyModal({ onApiKeySubmit, onClose }: ApiKeyModalProps) {
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && onClose) {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

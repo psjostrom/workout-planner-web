@@ -51,26 +51,33 @@ function HomeContent() {
 
   return (
     <>
-      {showApiKeyModal && <ApiKeyModal onApiKeySubmit={handleApiKeySubmit} />}
+      {showApiKeyModal && (
+        <ApiKeyModal
+          onApiKeySubmit={handleApiKeySubmit}
+          onClose={() => setShowApiKeyModal(false)}
+        />
+      )}
 
-      <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
-        <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <div className="h-screen bg-slate-50 flex flex-col text-slate-900 font-sans overflow-hidden">
+        <div className="bg-white border-b border-slate-200 flex-shrink-0 z-30">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-4">
             <TabNavigation activeTab={activeTab} onTabChange={handleTabChange} />
           </div>
         </div>
 
-        {activeTab === "planner" && <PlannerScreen apiKey={apiKey} />}
+        <div className="flex-1 overflow-hidden">
+          {activeTab === "planner" && <PlannerScreen apiKey={apiKey} />}
 
-        {activeTab === "calendar" && (
-          <CalendarScreen
-            apiKey={apiKey}
-            phaseName={phaseInfo.name}
-            currentWeek={phaseInfo.week}
-            totalWeeks={18}
-            progress={phaseInfo.progress}
-          />
-        )}
+          {activeTab === "calendar" && (
+            <CalendarScreen
+              apiKey={apiKey}
+              phaseName={phaseInfo.name}
+              currentWeek={phaseInfo.week}
+              totalWeeks={18}
+              progress={phaseInfo.progress}
+            />
+          )}
+        </div>
       </div>
     </>
   );

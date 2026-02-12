@@ -30,6 +30,11 @@ export interface AnalysisResult {
     currentFuel: number;
     plotData: { time: number; glucose: number }[];
   } | null;
+  easyRun: {
+    trend: number;
+    currentFuel: number;
+    plotData: { time: number; glucose: number }[];
+  } | null;
   interval: {
     trend: number;
     currentFuel: number;
@@ -40,7 +45,8 @@ export interface AnalysisResult {
 
 interface PlanContext {
   fuelInterval: number; // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
-  fuelSteady: number; // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
+  fuelLong: number; // High fuel for long runs (e.g., 10g/10m)
+  fuelEasy: number; // Moderate fuel for easy/bonus runs (e.g., 8g/10m)
   raceDate: Date;
   raceDist: number;
   prefix: string;
@@ -86,7 +92,7 @@ interface IntervalsStream {
 // --- HELPER FUNCTIONS ---
 export const getEstimatedDuration = (event: WorkoutEvent): number => {
   // 1. Long Run: Calculate 6 min/km (approximate trail pace)
-  if (event.name.includes("LR")) {
+  if (event.name.includes("Long")) {
     const match = event.name.match(/(\d+)km/);
     if (match) return parseInt(match[1]) * 6;
   }
@@ -109,6 +115,14 @@ const formatStep = (
   return note ? `${note} ${core}` : core;
 };
 
+// Helper to calculate total carbs for a workout
+const calculateWorkoutCarbs = (
+  durationMinutes: number,
+  fuelRateGPer10Min: number,
+): number => {
+  return Math.round((durationMinutes / 10) * fuelRateGPer10Min);
+};
+
 const createWorkoutText = (
   title: string,
   warmup: string,
@@ -116,7 +130,7 @@ const createWorkoutText = (
   cooldown: string,
   repeats: number = 1,
 ): string => {
-  return [
+  const lines = [
     title,
     "",
     "Warmup",
@@ -127,8 +141,10 @@ const createWorkoutText = (
     "",
     "Cooldown",
     `- ${cooldown}`, // Added dash here
-    "",
-  ].join("\n");
+  ];
+
+  lines.push("");
+  return lines.join("\n");
 };
 
 // --- ANALYSIS LOGIC ---
@@ -168,11 +184,13 @@ async function fetchStreams(
 }
 
 // Categorize workout by type based on name
-function getWorkoutCategory(name: string): "long" | "interval" | "other" {
+function getWorkoutCategory(name: string): "long" | "interval" | "easy" | "other" {
   const lowerName = name.toLowerCase();
   if (lowerName.includes("lr") || lowerName.includes("long")) return "long";
   if (lowerName.includes("tempo") || lowerName.includes("hills"))
     return "interval";
+  if (lowerName.includes("easy") || lowerName.includes("bonus"))
+    return "easy";
   return "other";
 }
 
@@ -200,7 +218,7 @@ async function analyzeRun(
   let currentFuel = 10;
 
   // Get fuel from description
-  const match = run.description?.match(/FUEL:\s*(\d+)g/i);
+  const match = run.description?.match(/FUEL PER 10:\s*(\d+)g/i);
   if (match) currentFuel = parseInt(match[1]);
 
   if (gData.length > 0 && tData.length > 1) {
@@ -241,7 +259,7 @@ export async function analyzeHistory(
     );
 
     if (relevant.length === 0) {
-      return { longRun: null, interval: null, msg: "No activities found" };
+      return { longRun: null, easyRun: null, interval: null, msg: "No activities found" };
     }
 
     // Sort by date (most recent first)
@@ -250,9 +268,12 @@ export async function analyzeHistory(
         new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
     );
 
-    // Find most recent Long run and Interval run
+    // Find most recent run from each category
     const mostRecentLong = relevant.find(
-      (a) => getWorkoutCategory(a.name) === "long",
+      (a) => getWorkoutCategory(a.name) === "long"
+    );
+    const mostRecentEasy = relevant.find(
+      (a) => getWorkoutCategory(a.name) === "easy"
     );
     const mostRecentInterval = relevant.find(
       (a) => getWorkoutCategory(a.name) === "interval",
@@ -260,15 +281,19 @@ export async function analyzeHistory(
 
     const result: AnalysisResult = {
       longRun: null,
+      easyRun: null,
       interval: null,
     };
 
-    // Analyze Long run if found
+    // Analyze each category if found
     if (mostRecentLong) {
       result.longRun = await analyzeRun(mostRecentLong, apiKey);
     }
 
-    // Analyze Interval run if found
+    if (mostRecentEasy) {
+      result.easyRun = await analyzeRun(mostRecentEasy, apiKey);
+    }
+
     if (mostRecentInterval) {
       result.interval = await analyzeRun(mostRecentInterval, apiKey);
     }
@@ -298,17 +323,6 @@ const generateQualityRun = (
   const isRaceTest =
     weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-  const stratHard = `PUMP OFF - FUEL: ${ctx.fuelInterval}g/10m`; // Intervals use LOW fuel
-  // FIX: We add the strategy as a Note in formatStep, so it ends up first on the line
-  const wu = formatStep(
-    "10m",
-    ctx.zones.easy.min,
-    ctx.zones.easy.max,
-    ctx.lthr,
-    stratHard,
-  );
-  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
-
   const prefixName = `W${weekNum.toString().padStart(2, "0")} Tue`;
   const isTempo = weekIdx % 2 !== 0;
 
@@ -324,6 +338,22 @@ const generateQualityRun = (
           formatStep("8m", ctx.zones.tempo.min, ctx.zones.tempo.max, ctx.lthr),
           formatStep("2m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr),
         ];
+
+    // Calculate total duration and carbs
+    const repDuration = isShakeout ? 7 : 10; // 5m+2m or 8m+2m
+    const totalDuration = 10 + (reps * repDuration) + 5; // warmup + main + cooldown
+    const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelInterval);
+
+    const stratHard = `PUMP OFF - FUEL PER 10: ${ctx.fuelInterval}g TOTAL: ${totalCarbs}g`; // Intervals use LOW fuel
+    const wu = formatStep(
+      "10m",
+      ctx.zones.easy.min,
+      ctx.zones.easy.max,
+      ctx.lthr,
+      stratHard,
+    );
+    const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+
     return {
       start_date_local: new Date(date.setHours(12, 0, 0)),
       name: `${prefixName} Tempo ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
@@ -350,6 +380,21 @@ const generateQualityRun = (
       "Downhill",
     ),
   ];
+
+  // Calculate total duration and carbs
+  const totalDuration = 10 + (reps * 4) + 5; // warmup + (reps * 4m) + cooldown
+  const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelInterval);
+
+  const stratHard = `PUMP OFF - FUEL PER 10: ${ctx.fuelInterval}g TOTAL: ${totalCarbs}g`; // Intervals use LOW fuel
+  const wu = formatStep(
+    "10m",
+    ctx.zones.easy.min,
+    ctx.zones.easy.max,
+    ctx.lthr,
+    stratHard,
+  );
+  const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
+
   return {
     start_date_local: new Date(date.setHours(12, 0, 0)),
     name: `${prefixName} Hills ${ctx.prefix}${isShakeout ? " [SHAKEOUT]" : ""}`,
@@ -374,8 +419,18 @@ const generateEasyRun = (
   const isRaceTest =
     weekNum === ctx.totalWeeks - 2 || weekNum === ctx.totalWeeks - 3;
 
-  const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Easy runs use MODERATE fuel
-  // FIX: Strategy here as well
+  const duration = isRaceWeek
+    ? 20
+    : isRaceTest
+      ? 30
+      : 40 + Math.floor(progress * 20);
+  const name = `W${weekNum.toString().padStart(2, "0")} Thu Easy ${ctx.prefix}${isRaceWeek ? " [SHAKEOUT]" : ""}`;
+
+  // Calculate total duration and carbs
+  const totalDuration = 10 + duration + 5; // warmup + main + cooldown
+  const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelEasy);
+
+  const stratEasy = `PUMP ON (-50%) - FUEL PER 10: ${ctx.fuelEasy}g TOTAL: ${totalCarbs}g`; // Easy runs use MODERATE fuel
   const wu = formatStep(
     "10m",
     ctx.zones.easy.min,
@@ -385,12 +440,6 @@ const generateEasyRun = (
   );
   const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-  const duration = isRaceWeek
-    ? 20
-    : isRaceTest
-      ? 30
-      : 40 + Math.floor(progress * 20);
-  const name = `W${weekNum.toString().padStart(2, "0")} Thu Easy ${ctx.prefix}${isRaceWeek ? " [SHAKEOUT]" : ""}`;
   return {
     start_date_local: new Date(date.setHours(12, 0, 0)),
     name,
@@ -406,6 +455,7 @@ const generateEasyRun = (
         ),
       ],
       cd,
+      1,
     ),
     external_id: `${ctx.prefix}-thu-${weekNum}`,
     type: "Run",
@@ -423,8 +473,13 @@ const generateBonusRun = (
   if (isSameDay(date, ctx.raceDate)) return null;
   const weekNum = weekIdx + 1;
 
-  const stratEasy = `PUMP ON (-50%) - FUEL: ${ctx.fuelSteady}g/10m`; // Bonus runs use MODERATE fuel
-  // FIX: Strategy here
+  const name = `W${weekNum.toString().padStart(2, "0")} Sat Easy (Optional) ${ctx.prefix}`;
+
+  // Calculate total duration and carbs
+  const totalDuration = 10 + 30 + 5; // warmup + main + cooldown
+  const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelEasy);
+
+  const stratEasy = `PUMP ON (-50%) - FUEL PER 10: ${ctx.fuelEasy}g TOTAL: ${totalCarbs}g`; // Bonus runs use MODERATE fuel
   const wu = formatStep(
     "10m",
     ctx.zones.easy.min,
@@ -434,7 +489,6 @@ const generateBonusRun = (
   );
   const cd = formatStep("5m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr);
 
-  const name = `W${weekNum.toString().padStart(2, "0")} Sat Bonus (Optional) ${ctx.prefix}`;
   return {
     start_date_local: new Date(date.setHours(12, 0, 0)),
     name,
@@ -443,6 +497,7 @@ const generateBonusRun = (
       wu,
       [formatStep("30m", ctx.zones.easy.min, ctx.zones.easy.max, ctx.lthr)],
       cd,
+      1,
     ),
     external_id: `${ctx.prefix}-sat-${weekNum}`,
     type: "Run",
@@ -456,8 +511,13 @@ const generateLongRun = (
 ): WorkoutEvent | null => {
   const weekNum = weekIdx + 1;
   const isRaceWeek = weekNum === ctx.totalWeeks;
-  const stratLong = `PUMP OFF - FUEL: ${ctx.fuelSteady}g/10m`; // Long runs use HIGH fuel
   if (isRaceWeek) {
+    // Calculate total carbs for race day
+    // Estimate duration: Race pace ~5.15 min/km (88-94% LTHR)
+    const estimatedRaceDuration = ctx.raceDist * 5.15;
+    const totalCarbs = calculateWorkoutCarbs(estimatedRaceDuration, ctx.fuelLong);
+    const stratLong = `PUMP OFF - FUEL PER 10: ${ctx.fuelLong}g TOTAL: ${totalCarbs}g`; // Long runs use HIGH fuel
+
     return {
       start_date_local: new Date(ctx.raceDate.setHours(10, 0, 0)),
       name: `RACE DAY ${ctx.prefix}`,
@@ -494,7 +554,13 @@ const generateLongRun = (
     type = " [RACE TEST]";
   }
 
-  // FIX: Strategy here
+  // Calculate total duration and carbs
+  // Estimate duration: Zone 2 pace ~6.15 min/km (77-84% LTHR)
+  const estimatedMainDuration = km * 6.15;
+  const totalDuration = 10 + estimatedMainDuration + 5; // warmup + main + cooldown
+  const totalCarbs = calculateWorkoutCarbs(totalDuration, ctx.fuelLong);
+
+  const stratLong = `PUMP OFF - FUEL PER 10: ${ctx.fuelLong}g TOTAL: ${totalCarbs}g`; // Long runs use HIGH fuel
   const wu = formatStep(
     "10m",
     ctx.zones.easy.min,
@@ -506,7 +572,7 @@ const generateLongRun = (
 
   return {
     start_date_local: new Date(date.setHours(10, 0, 0)),
-    name: `W${weekNum.toString().padStart(2, "0")} Sun LR (${km}km)${type} ${ctx.prefix}`,
+    name: `W${weekNum.toString().padStart(2, "0")} Sun Long (${km}km)${type} ${ctx.prefix}`,
     description: createWorkoutText(
       `${stratLong} (Trail)`,
       wu,
@@ -519,6 +585,7 @@ const generateLongRun = (
         ),
       ],
       cd,
+      1,
     ),
     external_id: `${ctx.prefix}-sun-${weekNum}`,
     type: "Run",
@@ -528,7 +595,8 @@ const generateLongRun = (
 // --- MAIN ORCHESTRATOR ---
 export function generatePlan(
   fuelInterval: number, // Low fuel for intervals/tempo/hills (e.g., 5g/10m)
-  fuelSteady: number, // Moderate/high fuel for easy/long runs (e.g., 10g/10m)
+  fuelLong: number, // High fuel for long runs (e.g., 10g/10m)
+  fuelEasy: number, // Moderate fuel for easy/bonus runs (e.g., 8g/10m)
   raceDateStr: string,
   raceDist: number,
   prefix: string,
@@ -540,7 +608,8 @@ export function generatePlan(
   const today = new Date();
   const ctx: PlanContext = {
     fuelInterval,
-    fuelSteady,
+    fuelLong,
+    fuelEasy,
     raceDate,
     raceDist,
     prefix,
@@ -815,6 +884,7 @@ export async function fetchCalendarData(
       const category = getWorkoutCategory(activity.name);
       const details = allDetails[index];
 
+
       // Calculate pace (min/km) if we have distance and duration
       let pace: number | undefined;
       if (activity.distance && activity.moving_time) {
@@ -887,6 +957,8 @@ export async function fetchCalendarData(
         description: event.description || "",
         type: isRace ? "race" : "planned",
         category,
+        distance: event.distance || 0,
+        duration: event.moving_time || event.duration || event.elapsed_time,
       });
     }
 

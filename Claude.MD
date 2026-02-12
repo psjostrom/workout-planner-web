@@ -2,7 +2,7 @@
 
 ## 1. Core Purpose
 
-This is a specialized workout generator for a Type 1 Diabetic runner targeting the **EcoTrail 16km (2026-06-13)**. The application generates training plans that sync directly to **Intervals.icu**, with a heavy focus on blood glucose management and aerobic base building.
+This is a specialized workout generator for a Type 1 Diabetic runner targeting the **EcoTrail 16km (2026-06-13)**. The application generates training plans that sync directly to **Intervals.icu**, with a heavy focus on blood glucose management and aerobic base building. After it have been uploaded to Intervals, it gets synced with **Garmin connect** and can therefore be started from the user's **Garmin Forerunner 970**.
 
 ## 2. The User (Physiology & Context)
 

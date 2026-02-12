@@ -31,12 +31,17 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
   const [totalWeeks, setTotalWeeks] = useState(18);
   const [startKm, setStartKm] = useState(8);
   const [fuelInterval, setFuelInterval] = useState(5);
-  const [fuelSteady, setFuelSteady] = useState(10);
+  const [fuelLong, setFuelLong] = useState(10);
+  const [fuelEasy, setFuelEasy] = useState(8);
   const [planEvents, setPlanEvents] = useState<WorkoutEvent[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [longRunAnalysis, setLongRunAnalysis] = useState<{
+    trend: number;
+    plotData: { time: number; glucose: number }[];
+  } | null>(null);
+  const [easyRunAnalysis, setEasyRunAnalysis] = useState<{
     trend: number;
     plotData: { time: number; glucose: number }[];
   } | null>(null);
@@ -55,22 +60,41 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
     setIsAnalyzing(true);
     const result = await analyzeHistory(apiKey, prefix);
 
+    // Long Run Analysis
     if (result.longRun) {
       setLongRunAnalysis({
         trend: result.longRun.trend,
         plotData: result.longRun.plotData,
       });
 
-      let suggSteady = result.longRun.currentFuel;
+      let suggLong = result.longRun.currentFuel;
       if (result.longRun.trend < -3.0) {
         const diff = Math.abs(result.longRun.trend - -3.0);
-        suggSteady += Math.min(1 + Math.floor(diff * 0.7), 4);
+        suggLong += Math.min(1 + Math.floor(diff * 0.7), 4);
       } else if (result.longRun.trend > 3.0) {
-        suggSteady = Math.max(0, suggSteady - 1);
+        suggLong = Math.max(0, suggLong - 1);
       }
-      setFuelSteady(suggSteady);
+      setFuelLong(suggLong);
     }
 
+    // Easy Run Analysis
+    if (result.easyRun) {
+      setEasyRunAnalysis({
+        trend: result.easyRun.trend,
+        plotData: result.easyRun.plotData,
+      });
+
+      let suggEasy = result.easyRun.currentFuel;
+      if (result.easyRun.trend < -3.0) {
+        const diff = Math.abs(result.easyRun.trend - -3.0);
+        suggEasy += Math.min(1 + Math.floor(diff * 0.7), 4);
+      } else if (result.easyRun.trend > 3.0) {
+        suggEasy = Math.max(0, suggEasy - 1);
+      }
+      setFuelEasy(suggEasy);
+    }
+
+    // Interval Analysis
     if (result.interval) {
       setIntervalAnalysis({
         trend: result.interval.trend,
@@ -91,7 +115,8 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
   const handleGenerate = () => {
     const events = generatePlan(
       fuelInterval,
-      fuelSteady,
+      fuelLong,
+      fuelEasy,
       raceDate,
       raceDist,
       prefix,
@@ -100,10 +125,12 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
       lthr,
     );
 
-    // Filter out past workouts
+    // Filter out past workouts and today - only show future workouts
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const futureEvents = events.filter((e) => e.start_date_local >= today);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const futureEvents = events.filter((e) => e.start_date_local >= tomorrow);
 
     setPlanEvents(futureEvents);
     setStatusMsg("");
@@ -125,8 +152,8 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans">
-      <aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 shrink-0">
+    <div className="h-full bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans overflow-hidden">
+      <aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 shrink-0 overflow-y-auto h-full">
         <div className="flex items-center gap-2 mb-2">
           <h1 className="text-xl font-bold tracking-tight">
             🏃‍♂️‍➡️ Race Planner
@@ -160,39 +187,44 @@ export function PlannerScreen({ apiKey }: PlannerScreenProps) {
         <AnalysisSection
           prefix={prefix}
           longRunAnalysis={longRunAnalysis}
+          easyRunAnalysis={easyRunAnalysis}
           intervalAnalysis={intervalAnalysis}
           fuelInterval={fuelInterval}
-          fuelSteady={fuelSteady}
+          fuelLong={fuelLong}
+          fuelEasy={fuelEasy}
           isAnalyzing={isAnalyzing}
           onAnalyze={handleAnalyze}
           onFuelIntervalChange={setFuelInterval}
-          onFuelSteadyChange={setFuelSteady}
+          onFuelLongChange={setFuelLong}
+          onFuelEasyChange={setFuelEasy}
         />
 
         <button
           onClick={handleGenerate}
-          className="mt-auto w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition shadow-lg mb-24 md:mb-0"
+          className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition shadow-lg mt-auto"
         >
           Generate Plan
         </button>
       </aside>
 
-      <main className="flex-1 p-4 md:p-8 bg-slate-50">
-        <div className="max-w-6xl mx-auto pb-32 md:pb-20">
-          {planEvents.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <div className="space-y-8">
-              <WeeklyVolumeChart data={chartData} />
-              <ActionBar
-                workoutCount={planEvents.length}
-                isUploading={isUploading}
-                onUpload={handleUpload}
-              />
-              <StatusMessage message={statusMsg} />
-              <WorkoutList events={planEvents} />
-            </div>
-          )}
+      <main className="flex-1 bg-slate-50 overflow-y-auto h-full">
+        <div className="p-4 md:p-8">
+          <div className="max-w-6xl mx-auto">
+            {planEvents.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <div className="space-y-8">
+                <WeeklyVolumeChart data={chartData} />
+                <ActionBar
+                  workoutCount={planEvents.length}
+                  isUploading={isUploading}
+                  onUpload={handleUpload}
+                />
+                <StatusMessage message={statusMsg} />
+                <WorkoutList events={planEvents} />
+              </div>
+            )}
+          </div>
         </div>
       </main>
     </div>
