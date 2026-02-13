@@ -505,6 +505,7 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
                                 z4={event.hrZones.z4}
                                 z5={event.hrZones.z5}
                                 maxHeight={20}
+                                hrData={event.streamData?.heartrate}
                               />
                             )}
                             {event.type === "planned" && event.description && (
@@ -585,6 +586,7 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
                                 z4={event.hrZones.z4}
                                 z5={event.hrZones.z5}
                                 maxHeight={20}
+                                hrData={event.streamData?.heartrate}
                               />
                             )}
                             {event.type === "planned" && event.description && (
@@ -762,6 +764,7 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
                                   z4={event.hrZones.z4}
                                   z5={event.hrZones.z5}
                                   maxHeight={40}
+                                  hrData={event.streamData?.heartrate}
                                 />
                               </div>
                             )}

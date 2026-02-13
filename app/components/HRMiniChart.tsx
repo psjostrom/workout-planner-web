@@ -1,3 +1,5 @@
+import { DataPoint } from "@/lib/plannerLogic";
+
 interface HRMiniChartProps {
   z1: number;
   z2: number;
@@ -5,15 +7,71 @@ interface HRMiniChartProps {
   z4: number;
   z5: number;
   maxHeight?: number;
+  hrData?: DataPoint[]; // Optional HR time-series data
+  lthr?: number; // Optional LTHR for zone coloring
 }
 
-// Create a simplified vertical bar chart from HR zone data
-export function HRMiniChart({ z1, z2, z3, z4, z5, maxHeight = 40 }: HRMiniChartProps) {
+// Get HR zone color based on value
+const getHRColor = (hr: number, lthr: number = 169): string => {
+  const percent = (hr / lthr) * 100;
+  if (percent >= 100) return "#ef4444"; // Z5 - red-500
+  if (percent >= 94) return "#fb923c"; // Z4 - orange-400
+  if (percent >= 88) return "#fbbf24"; // Z3 - yellow-400
+  if (percent >= 80) return "#06b6d4"; // Z2 - cyan-500
+  return "#6ee7b7"; // Z1 - emerald-300
+};
+
+// Create a mini time-series graph from HR stream data
+export function HRMiniChart({
+  z1,
+  z2,
+  z3,
+  z4,
+  z5,
+  maxHeight = 40,
+  hrData,
+  lthr = 169,
+}: HRMiniChartProps) {
+  // If we have HR stream data, render a time-series mini graph
+  if (hrData && hrData.length > 0) {
+    const hrValues = hrData.map((d) => d.value);
+    const minHR = Math.min(...hrValues);
+    const maxHR = Math.max(...hrValues);
+    const hrRange = maxHR - minHR;
+
+    // Sample the data to max 50 points for performance
+    const sampleRate = Math.max(1, Math.floor(hrData.length / 50));
+    const sampledData = hrData.filter((_, idx) => idx % sampleRate === 0);
+
+    return (
+      <div
+        className="w-full flex items-end gap-px"
+        style={{ height: `${maxHeight}px` }}
+      >
+        {sampledData.map((point, idx) => {
+          const normalizedHeight =
+            hrRange > 0 ? ((point.value - minHR) / hrRange) * 100 : 50;
+          const color = getHRColor(point.value, lthr);
+
+          return (
+            <div
+              key={idx}
+              style={{
+                width: `${100 / sampledData.length}%`,
+                height: `${Math.max(normalizedHeight, 10)}%`,
+                backgroundColor: color,
+              }}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Fallback to zone-based visualization if no stream data
   const total = z1 + z2 + z3 + z4 + z5;
   if (total === 0) return null;
 
-  // Create segments representing time spent in each zone
-  // We'll create proportional bars where each bar's height represents the zone
   const zones = [
     { time: z1, height: 40, color: "#6ee7b7" }, // Z1 - emerald-300
     { time: z2, height: 55, color: "#06b6d4" }, // Z2 - cyan-500
@@ -22,17 +80,16 @@ export function HRMiniChart({ z1, z2, z3, z4, z5, maxHeight = 40 }: HRMiniChartP
     { time: z5, height: 100, color: "#ef4444" }, // Z5 - red-500
   ];
 
-  // Create bar segments proportional to time spent
   const segments: Array<{ width: number; height: number; color: string }> = [];
 
   zones.forEach((zone) => {
     if (zone.time > 0) {
       const proportion = zone.time / total;
-      const numBars = Math.max(1, Math.round(proportion * 20)); // Create up to 20 bars
+      const numBars = Math.max(1, Math.round(proportion * 20));
 
       for (let i = 0; i < numBars; i++) {
         segments.push({
-          width: 100 / 20, // Each bar takes equal width
+          width: 100 / 20,
           height: zone.height,
           color: zone.color,
         });

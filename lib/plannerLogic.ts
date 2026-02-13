@@ -793,7 +793,7 @@ export async function fetchActivityDetails(
     }
 
     // Convert velocity (m/s) to pace (min/km) with outlier filtering
-    const paceData = velocityData.map(v => {
+    const paceData = velocityData.map((v) => {
       if (v === 0 || v < 0.001) return null; // Stopped or invalid
       const pace = 1000 / (v * 60); // Convert m/s to min/km
 
@@ -849,7 +849,9 @@ export async function fetchActivityDetails(
             time: Math.round(t / 60),
             value: paceData[idx], // Converted from velocity_smooth (m/s) to min/km
           }))
-          .filter((point) => point.value !== null && point.value > 0) as DataPoint[];
+          .filter(
+            (point) => point.value !== null && point.value > 0,
+          ) as DataPoint[];
       }
 
       if (cadenceData.length > 0) {
@@ -916,6 +918,8 @@ export async function fetchCalendarData(
     );
 
     // Process completed activities
+    const activityMap = new Map<string, CalendarEvent>();
+
     runActivities.forEach((activity: IntervalsActivity) => {
       const category = getWorkoutCategory(activity.name);
 
@@ -929,7 +933,10 @@ export async function fetchCalendarData(
 
       // Extract HR zones from the API response (icu_hr_zone_times)
       let hrZones: HRZoneData | undefined;
-      if (activity.icu_hr_zone_times && activity.icu_hr_zone_times.length >= 5) {
+      if (
+        activity.icu_hr_zone_times &&
+        activity.icu_hr_zone_times.length >= 5
+      ) {
         hrZones = {
           z1: activity.icu_hr_zone_times[0],
           z2: activity.icu_hr_zone_times[1],
@@ -940,7 +947,9 @@ export async function fetchCalendarData(
       }
 
       // Try to find matching planned event for this activity to get the description
-      const activityDate = parseISO(activity.start_date_local || activity.start_date);
+      const activityDate = parseISO(
+        activity.start_date_local || activity.start_date,
+      );
       const matchingEvent = events.find((event: any) => {
         if (event.category !== "WORKOUT") return false;
         const eventDate = parseISO(event.start_date_local);
@@ -956,9 +965,10 @@ export async function fetchCalendarData(
       });
 
       // Use event description if found, otherwise use activity description
-      const description = matchingEvent?.description || activity.description || "";
+      const description =
+        matchingEvent?.description || activity.description || "";
 
-      calendarEvents.push({
+      const calendarEvent: CalendarEvent = {
         id: `activity-${activity.id}`,
         date: activityDate,
         name: activity.name,
@@ -976,9 +986,12 @@ export async function fetchCalendarData(
         cadence: activity.average_cadence
           ? activity.average_cadence * 2
           : undefined, // Convert single-foot to total steps
-        hrZones, // HR zones from API - no additional calls needed!
-        // streamData will still be loaded on-demand when clicking on workout
-      });
+        hrZones,
+        // streamData will be loaded below for recent activities
+      };
+
+      activityMap.set(activity.id, calendarEvent);
+      calendarEvents.push(calendarEvent);
     });
 
     // Process planned events (but skip ones that have been completed)
