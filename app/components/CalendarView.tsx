@@ -181,7 +181,7 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
   // Lazy-load stream data when modal opens for a completed workout
   useEffect(() => {
     if (!selectedEvent || selectedEvent.type !== "completed") return;
-    if (selectedEvent.streamData || selectedEvent.hrZones) return; // Already loaded
+    if (selectedEvent.streamData) return; // Already loaded
     if (!apiKey) return;
 
     const loadStreamData = async () => {
