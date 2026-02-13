@@ -599,18 +599,18 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
                         {format(day, "d")}
                       </div>
 
-                      <div className="flex-1 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+                      <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
                         {dayEvents.map((event) => (
                           <button
                             key={event.id}
                             onClick={() => openWorkoutModal(event)}
-                            className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
+                            className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} text-left w-full`}
                           >
                             <div className="flex items-center gap-0.5 mb-0.5">
                               <span className="flex-shrink-0">
                                 {getEventIcon(event)}
                               </span>
-                              <span className="hidden sm:inline truncate">
+                              <span className="hidden sm:inline break-words">
                                 {event.name}
                               </span>
                             </div>
@@ -679,18 +679,18 @@ export function CalendarView({ apiKey }: CalendarViewProps) {
                         {format(day, "d MMM")}
                       </div>
 
-                      <div className="flex-1 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+                      <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
                         {dayEvents.map((event) => (
                           <button
                             key={event.id}
                             onClick={() => openWorkoutModal(event)}
-                            className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} w-full text-left break-words`}
+                            className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition ${getEventStyle(event)} text-left w-full`}
                           >
                             <div className="flex items-center gap-0.5 mb-0.5">
                               <span className="flex-shrink-0">
                                 {getEventIcon(event)}
                               </span>
-                              <span className="hidden sm:inline truncate">
+                              <span className="hidden sm:inline break-words">
                                 {event.name}
                               </span>
                             </div>

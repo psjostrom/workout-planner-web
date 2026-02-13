@@ -41,7 +41,7 @@ export function HRMiniChart({ z1, z2, z3, z4, z5, maxHeight = 40 }: HRMiniChartP
   });
 
   return (
-    <div className="w-full flex items-end gap-px" style={{ height: `${maxHeight}px` }}>
+    <div className="w-full flex items-end" style={{ height: `${maxHeight}px` }}>
       {segments.map((segment, idx) => (
         <div
           key={idx}

@@ -116,7 +116,7 @@ export function WorkoutStructureBar({
   };
 
   return (
-    <div className="w-full flex items-end gap-px" style={{ height: `${maxHeight}px` }}>
+    <div className="w-full flex items-end" style={{ height: `${maxHeight}px` }}>
       {segments.map((segment, idx) => {
         const widthPercent = (segment.duration / totalDuration) * 100;
         // Map intensity 70-100% to 30-100% height
